@@ -1,0 +1,16 @@
+[project]
+name = "mediapi"
+version = "0.0.1"
+description = "Pi Zero MP3 Player"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "gpiozero>=2.0.1",
+    "numpy>=2.4.2",
+    "pillow>=12.1.1",
+    # Only install hardware libs when on a Raspberry Pi (ARM architecture)
+    "spidev>=3.8; platform_machine == 'aarch64' or platform_machine == 'armv7l'",
+    "lgpio>=0.2.2.0; platform_machine == 'aarch64' or platform_machine == 'armv7l'",
+    "python-vlc>=3.0.21203",
+    "requests>=2.32.5",
+]
