@@ -8,12 +8,12 @@ from PIL import Image, ImageDraw, ImageFont
 
 # --- FEATURE TOGGLES ---
 # Set to False to hide/disable specific sources
-FEATURES = {"JELLYFIN": False, "ABS": False, "LOCAL": True, "BT_PAIR": True}
+FEATURES = {"JELLYFIN": False, "ABS": False, "LOCAL": True, "BT_PAIR": False}
 
 # --- Configuration ---
 JELLYFIN = {"url": "http://IP:8096", "api": "KEY", "user": "ID"}
 ABS = {"url": "http://IP:8000", "api": "KEY", "lib_id": "ID"}
-LOCAL_PATH = "/home/pi/music"
+LOCAL_PATH = os.path.expanduser("~/music")
 BOOKMARK_FILE = "bookmarks.json"
 
 
