@@ -1,27 +1,24 @@
 #!/bin/bash
+set -e
 
-# 1. Get the current directory and user
+# Get absolute info
 PROJECT_DIR=$(pwd)
 CURRENT_USER=$(whoami)
+USER_HOME=$HOME
 
-echo "🚀 Starting Master Installation in $PROJECT_DIR..."
+echo "🚀 Installing Media Player Service for $CURRENT_USER..."
 
-# 2. Run your dependency script first
-if [ -f "./dep-install.sh" ]; then
-    echo "📦 Running dependency installer..."
-    chmod +x dep-install.sh
-    ./dep-install.sh
-else
-    echo "❌ Error: dep-install.sh not found. Put it in this folder!"
-    exit 1
-fi
+# 1. Run the dependency script
+chmod +x dep-install.sh
+./dep-install.sh
 
-# 3. Find where 'uv' is (even if it was just installed)
-export PATH="$HOME/.local/bin:$PATH"
-UV_PATH=$(command -v uv || echo "/home/$CURRENT_USER/.local/bin/uv")
+# 2. Define the exact UV path
+# We hardcode the home path here to prevent systemd path-resolve issues
+UV_PATH="$USER_HOME/.local/bin/uv"
 
-# 4. Create the systemd service file
-echo "🔧 Registering player.service with systemd..."
+echo "🔧 Creating systemd service with path: $UV_PATH"
+
+# 3. Create the service file
 sudo tee /etc/systemd/system/player.service > /dev/null <<EOF
 [Unit]
 Description=Media Player Service
@@ -34,22 +31,19 @@ Restart=always
 RestartSec=5
 User=$CURRENT_USER
 Group=audio
-# Ensures PulseAudio/VLC logs show up in journalctl
 Environment=PYTHONUNBUFFERED=1
+# Important for local uv installations:
+Environment=PATH=$USER_HOME/.local/bin:/usr/local/bin:/usr/bin:/bin
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-# 5. Refresh and start
-echo "🔄 Activating service..."
+# 4. Final Activation
+echo "🔄 Reloading and starting..."
+sudo systemctl unmask player.service
 sudo systemctl daemon-reload
 sudo systemctl enable player.service
 sudo systemctl restart player.service
 
-echo "-----------------------------------------------"
-echo "✅ Done! Your player is now a system service."
-echo "Check if it's running: systemctl status player.service"
-echo "Read the logs: journalctl -u player.service -f"
-echo "-----------------------------------------------"
-echo "⚠️  Since this was a fresh install, please run: sudo reboot"
+echo "✅ Installation Complete! Check logs with: journalctl -u player.service -f"

@@ -20,13 +20,14 @@ echo "--- 👤 Setting Permissions ---"
 sudo usermod -aG audio $USER
 sudo usermod -aG bluetooth $USER
 
-echo "--- 🐍 Setting up Python Environment with uv ---"
+echo "--- 🐍 Installing uv for $USER ---"
+# Force install uv as the current user, not root
 if ! command -v uv &> /dev/null; then
-    echo "uv not found. Installing..."
     curl -LsSf https://astral.sh/uv/install.sh | sh
-    # Refresh path for this session
-    export PATH="$HOME/.local/bin:$PATH"
 fi
+
+# Ensure the local bin is in the current script's path
+export PATH="$HOME/.local/bin:$PATH"
 
 # Sync the project (installs what's in your pyproject.toml)
 if [ -f "pyproject.toml" ]; then
