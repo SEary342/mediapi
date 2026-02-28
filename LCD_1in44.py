@@ -296,7 +296,7 @@ class LCD(config.RaspberryPi):
 			self.spi_writebyte(_buffer[i:i+4096])
 
 	def LCD_ShowImage(self,Image,Xstart,Ystart):
-		if (Image == None):
+		if (Image is None):
 			return
 		imwidth, imheight = Image.size
 		if imwidth != self.width or imheight != self.height:
