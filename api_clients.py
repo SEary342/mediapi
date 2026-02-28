@@ -63,52 +63,69 @@ class JellyfinClient:
 
 
 class AudiobookshelfClient:
-    """Audiobookshelf API client."""
+    """Audiobookshelf API client using standard requests."""
 
-    @staticmethod
-    def get_items(timeout=None):
-        """Fetch items from Audiobookshelf."""
-        if timeout is None:
-            timeout = ABS_TIMEOUT
+    server_url = ABS["url"].rstrip("/")
+    api_key = ABS["api"]
+    library_id = ABS.get("lib_id")  # Ensure this is in your app_config
 
-        headers = {"Authorization": f"Bearer {ABS['api']}"}
-        url = f"{ABS['url']}/api/libraries/{ABS['lib_id']}/items"
+    @classmethod
+    def get_items(cls, limit=50):
+        """
+        Fetch items from Audiobookshelf.
+        Note: ABS returns Books/Podcasts. We flatten them into 'Tracks'.
+        """
+        headers = {"Authorization": f"Bearer {cls.api_key}"}
+        # Get all items in the specified library
+        url = f"{cls.server_url}/api/libraries/{cls.library_id}/items"
+
         try:
-            logger.debug(
-                f"Fetching Audiobookshelf items from {ABS['url']} (timeout={timeout}s)"
-            )
-            response = requests.get(url, headers=headers, timeout=timeout)
+            response = requests.get(url, headers=headers, timeout=15)
             response.raise_for_status()
-            data = response.json()
-            items = [
-                {
-                    "name": i["media"]["metadata"]["title"],
-                    "id": i["id"],
-                    "source": "ABS",
-                }
-                for i in data.get("results", [])
-            ]
-            logger.info(f"Loaded {len(items)} items from Audiobookshelf")
-            return items
-        except requests.RequestException as e:
-            error_msg = str(e)
-            if "401" in error_msg or "Unauthorized" in error_msg:
-                logger.error("Audiobookshelf authentication failed - check API key")
-                raise Exception(
-                    "Audiobookshelf authentication failed - check ABS_API_KEY in .env"
-                )
-            elif "timeout" in error_msg.lower():
-                logger.error(
-                    f"Audiobookshelf timeout (network slow or server unresponsive). Try increasing ABS_TIMEOUT in api_clients.py: {e}"
-                )
-                raise Exception(
-                    f"Audiobookshelf timeout - server is slow. Try increasing ABS_TIMEOUT in the code. Error: {e}"
-                )
-            else:
-                logger.error(f"Audiobookshelf API error: {e}")
-                raise Exception(f"Audiobookshelf API error: {e}")
+            data = response.json()  # This returns a dict with a "results" list
 
-    @staticmethod
-    def get_stream_uri(item_id):
-        """Get stream URI for an Audiobookshelf item."""
-        return f"{ABS['url']}/api/items/{item_id}/play?token={ABS['api']}"
+            playlist = []
+            # ABS items are containers (Books). We need to get the audio files inside.
+            for book in data.get("results", []):
+                # We need to fetch the 'expanded' item to see the tracks
+                # For a simple MP3 player, we'll treat the Book Title as the track name
+                # and use the first audio file found.
+
+                item_name = (
+                    book.get("media", {})
+                    .get("metadata", {})
+                    .get("title", "Unknown Book")
+                )
+                item_id = book.get("id")
+
+                # We store the item_id. In get_stream_uri, we use the 'play' endpoint
+                # which ABS handles by streaming the combined book or the first file.
+                playlist.append(
+                    {
+                        "name": item_name,
+                        "id": item_id,
+                        "source": Source.ABS.value,
+                        "author": book.get("media", {})
+                        .get("metadata", {})
+                        .get("authorName", "Unknown"),
+                    }
+                )
+
+                if len(playlist) >= limit:
+                    break
+
+            logger.info(f"ABS: Loaded {len(playlist)} items")
+            return playlist
+
+        except Exception as e:
+            logger.error(f"Audiobookshelf Error: {e}")
+            return []
+
+    @classmethod
+    def get_stream_uri(cls, item_id):
+        """
+        Constructs a stream URI for an ABS item.
+        The /api/items/{id}/play endpoint is the most compatible with VLC.
+        """
+        # We append the token as a query param so VLC can authenticate the stream
+        return f"{cls.server_url}/api/items/{item_id}/play?token={cls.api_key}"
