@@ -140,12 +140,16 @@ class BluetoothManager:
 
     @staticmethod
     def _route_audio(mac_address):
-        """Route PipeWire audio output to the connected Bluetooth device."""
-        try:
-            # PipeWire uses underscores in MAC addresses for sink naming
-            sink_mac = mac_address.replace(":", "_")
+        """Route PipeWire audio output with retries for slow Pi Zero CPU."""
+        sink_mac = mac_address.replace(":", "_")
+        max_attempts = 5
 
-            # Get current sinks from PipeWire (pactl is the compatible interface)
+        logger.info(f"Waiting for PipeWire to initialize sink for {mac_address}...")
+
+        for attempt in range(max_attempts):
+            # Give the Pi more time to negotiate the codec (A2DP)
+            time.sleep(2)
+
             result = subprocess.run(
                 ["pactl", "list", "short", "sinks"],
                 capture_output=True,
@@ -156,26 +160,31 @@ class BluetoothManager:
             sink_name = None
             for line in result.stdout.split("\n"):
                 if sink_mac in line:
-                    # Line format: ID  NAME  MODULE  ID  STATE
                     parts = line.split("\t")
                     if len(parts) > 1:
                         sink_name = parts[1]
                         break
 
             if sink_name:
-                logger.debug(f"Setting default sink to: {sink_name}")
-                # Set default for new streams
+                # Found it! Now route the audio
                 BluetoothManager._run_cmd(f"pactl set-default-sink {sink_name}")
-
-                # Move any existing streams (like VLC currently playing) to the new sink
+                # Move any existing audio streams to the new speaker
                 move_cmd = f"pactl list short sink-inputs | cut -f1 | xargs -I{{}} pactl move-sink-input {{}} {sink_name}"
                 BluetoothManager._run_cmd(move_cmd)
 
-                logger.info(f"Audio routed to {sink_name}")
-            else:
-                logger.warning(
-                    f"Connected to {mac_address}, but no PipeWire sink found. Is the device an audio device?"
-                )
+                # Boost volume just in case it defaulted to 0
+                BluetoothManager._run_cmd(f"pactl set-sink-volume {sink_name} 70%")
 
-        except Exception as e:
-            logger.warning(f"Failed to route audio: {e}")
+                logger.info(
+                    f"✅ Audio successfully routed to {sink_name} (Attempt {attempt + 1})"
+                )
+                return True
+
+            logger.debug(
+                f"Sink not ready yet, retrying... ({attempt + 1}/{max_attempts})"
+            )
+
+        logger.warning(
+            f"❌ Connected, but no PipeWire sink appeared for {mac_address} after {max_attempts} attempts."
+        )
+        return False
