@@ -63,69 +63,92 @@ class JellyfinClient:
 
 
 class AudiobookshelfClient:
-    """Audiobookshelf API client using standard requests."""
+    """Audiobookshelf API client for Podcasts and Books."""
 
     server_url = ABS["url"].rstrip("/")
     api_key = ABS["api"]
-    library_id = ABS.get("lib_id")  # Ensure this is in your app_config
+    library_id = ABS.get("lib_id")
 
     @classmethod
-    def get_items(cls, limit=50):
+    def get_items(cls, limit=100):
         """
-        Fetch items from Audiobookshelf.
-        Note: ABS returns Books/Podcasts. We flatten them into 'Tracks'.
+        Fetch items and drill down into Podcasts to get Episodes.
         """
         headers = {"Authorization": f"Bearer {cls.api_key}"}
-        # Get all items in the specified library
+        # Get all items in the library
         url = f"{cls.server_url}/api/libraries/{cls.library_id}/items"
 
         try:
             response = requests.get(url, headers=headers, timeout=15)
             response.raise_for_status()
-            data = response.json()  # This returns a dict with a "results" list
+            data = response.json()
 
             playlist = []
-            # ABS items are containers (Books). We need to get the audio files inside.
-            for book in data.get("results", []):
-                # We need to fetch the 'expanded' item to see the tracks
-                # For a simple MP3 player, we'll treat the Book Title as the track name
-                # and use the first audio file found.
-
-                item_name = (
-                    book.get("media", {})
-                    .get("metadata", {})
-                    .get("title", "Unknown Book")
-                )
-                item_id = book.get("id")
-
-                # We store the item_id. In get_stream_uri, we use the 'play' endpoint
-                # which ABS handles by streaming the combined book or the first file.
-                playlist.append(
-                    {
-                        "name": item_name,
-                        "id": item_id,
-                        "source": Source.ABS.value,
-                        "author": book.get("media", {})
-                        .get("metadata", {})
-                        .get("authorName", "Unknown"),
-                    }
-                )
+            for item in data.get("results", []):
+                # Check if this is a Podcast
+                if item.get("mediaType") == "podcast":
+                    # We must "drill down" to get episodes for this podcast
+                    episodes = cls._get_podcast_episodes(item["id"])
+                    playlist.extend(episodes)
+                else:
+                    # It's a Book - use the standard container
+                    playlist.append(
+                        {
+                            "name": item.get("media", {})
+                            .get("metadata", {})
+                            .get("title", "Unknown Book"),
+                            "id": item["id"],
+                            "source": Source.ABS.value,
+                            "type": "book",
+                        }
+                    )
 
                 if len(playlist) >= limit:
                     break
 
-            logger.info(f"ABS: Loaded {len(playlist)} items")
+            logger.info(f"ABS: Flattened into {len(playlist)} playable tracks")
             return playlist
 
         except Exception as e:
-            logger.error(f"Audiobookshelf Error: {e}")
+            logger.error(f"Audiobookshelf Error fetching library: {e}")
+            return []
+
+    @classmethod
+    def _get_podcast_episodes(cls, podcast_id):
+        """Fetch individual episodes for a podcast ID."""
+        headers = {"Authorization": f"Bearer {cls.api_key}"}
+        # We need the expanded podcast object to see episodes
+        url = f"{cls.server_url}/api/items/{podcast_id}"
+
+        try:
+            resp = requests.get(url, headers=headers, timeout=10)
+            resp.raise_for_status()
+            data = resp.json()
+
+            episodes_data = data.get("media", {}).get("episodes", [])
+
+            episodes = []
+            for ep in episodes_data:
+                episodes.append(
+                    {
+                        # Name shown in browser: "Podcast Title - Episode Title"
+                        "name": f"{ep.get('title', 'Unknown Episode')}",
+                        "id": ep["id"],  # This is the Episode ID
+                        "source": Source.ABS.value,
+                        "type": "episode",
+                    }
+                )
+            return episodes
+        except Exception as e:
+            logger.error(f"Error drilling into podcast {podcast_id}: {e}")
             return []
 
     @classmethod
     def get_stream_uri(cls, item_id):
         """
-        Constructs a stream URI for an ABS item.
-        The /api/items/{id}/play endpoint is the most compatible with VLC.
+        Get stream URI.
+        Note: For episodes, the endpoint is /api/items/{podcast_id}/play/{episode_id}
+        But ABS allows /api/items/{episode_id}/play as well if it's a valid ID.
         """
-        # We append the token as a query param so VLC can authenticate the stream
+        # VLC needs the token in the URL for authentication
         return f"{cls.server_url}/api/items/{item_id}/play?token={cls.api_key}"
