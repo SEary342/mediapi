@@ -1,0 +1,177 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-800 text-white">
+  <div class="container mx-auto p-4">
+    <h1 class="text-4xl font-bold text-center mb-8">MediaPi Remote</h1>
+
+    <!-- Playback Controls -->
+    <div class="bg-gray-700 p-4 rounded-lg shadow-lg mb-8">
+      <h2 class="text-2xl font-bold mb-4">Playback</h2>
+      <div class="flex justify-center space-x-4">
+        <button id="prev-btn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg transition">Previous</button>
+        <button id="play-btn" class="bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-lg transition">Play</button>
+        <button id="pause-btn" class="bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-6 rounded-lg transition">Pause</button>
+        <button id="next-btn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg transition">Next</button>
+      </div>
+      <div id="status" class="text-center mt-4 text-lg">Status: Idle</div>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+
+      <!-- Media Sources -->
+      <div class="bg-gray-700 p-4 rounded-lg shadow-lg">
+        <h2 class="text-2xl font-bold mb-4">Media Sources</h2>
+        <div id="sources-list" class="space-y-2"></div>
+      </div>
+
+      <!-- Playlist -->
+      <div class="bg-gray-700 p-4 rounded-lg shadow-lg">
+        <h2 class="text-2xl font-bold mb-4">Playlist</h2>
+        <ul id="playlist-list" class="space-y-2 h-64 overflow-y-auto"></ul>
+      </div>
+
+      <!-- Bluetooth -->
+      <div class="bg-gray-700 p-4 rounded-lg shadow-lg">
+        <h2 class="text-2xl font-bold mb-4">Bluetooth</h2>
+        <button id="scan-btn" class="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg mb-4 transition">Scan for Devices</button>
+        <ul id="bt-devices-list" class="space-y-2 h-64 overflow-y-auto"></ul>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    const statusDiv = document.getElementById('status');
+    const sourcesList = document.getElementById('sources-list');
+    const playlistList = document.getElementById('playlist-list');
+    const btDevicesList = document.getElementById('bt-devices-list');
+
+    // --- Playback Controls ---
+    document.getElementById('play-btn').addEventListener('click', () => sendPlaybackCommand('play'));
+    document.getElementById('pause-btn').addEventListener('click', () => sendPlaybackCommand('pause'));
+    document.getElementById('next-btn').addEventListener('click', () => sendPlaybackCommand('next'));
+    document.getElementById('prev-btn').addEventListener('click', () => sendPlaybackCommand('previous'));
+
+    function sendPlaybackCommand(command) {
+      fetch(`/api/playback/${command}`, { method: 'POST' })
+        .then(response => response.json())
+        .then(data => {
+          updateStatus();
+        });
+    }
+
+    // --- Media Sources ---
+    function fetchSources() {
+      fetch('/api/sources')
+        .then(response => response.json())
+        .then(data => {
+          sourcesList.innerHTML = '';
+          data.forEach(source => {
+            const button = document.createElement('button');
+            button.textContent = source;
+            button.className = 'w-full text-left bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded transition';
+            button.onclick = () => selectSource(source);
+            sourcesList.appendChild(button);
+          });
+        });
+    }
+
+    function selectSource(source) {
+      fetch('/api/select_source', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source: source })
+      }).then(() => {
+        setTimeout(fetchPlaylist, 500); // Give server time to load
+      });
+    }
+
+    // --- Playlist ---
+    function fetchPlaylist() {
+      fetch('/api/playlist')
+        .then(response => response.json())
+        .then(data => {
+          playlistList.innerHTML = '';
+          data.forEach((item, index) => {
+            const li = document.createElement('li');
+            const button = document.createElement('button');
+            button.textContent = item;
+            button.className = 'w-full text-left hover:bg-gray-500 py-1 px-2 rounded';
+            button.onclick = () => playItem(index);
+            li.appendChild(button);
+            playlistList.appendChild(li);
+          });
+        });
+    }
+
+    function playItem(index) {
+      fetch(`/api/play_item/${index}`, { method: 'POST' });
+    }
+
+    // --- Bluetooth ---
+    document.getElementById('scan-btn').addEventListener('click', () => {
+      statusDiv.innerText = 'Status: Scanning for Bluetooth devices...';
+      fetch('/api/bt/scan', { method: 'POST' })
+        .then(() => {
+          setTimeout(fetchBtDevices, 5000); // Wait for scan to complete
+        });
+    });
+
+    function fetchBtDevices() {
+      fetch('/api/bt/devices')
+        .then(response => response.json())
+        .then(data => {
+          btDevicesList.innerHTML = '';
+          if (data.length === 0) {
+            btDevicesList.innerHTML = '<li class="text-gray-400">No devices found.</li>';
+            return;
+          }
+          data.forEach((device, index) => {
+            const li = document.createElement('li');
+            const button = document.createElement('button');
+            button.textContent = device;
+            button.className = 'w-full text-left hover:bg-gray-500 py-1 px-2 rounded';
+            button.onclick = () => connectBtDevice(index);
+            li.appendChild(button);
+            btDevicesList.appendChild(li);
+          });
+        });
+    }
+
+    function connectBtDevice(index) {
+        statusDiv.innerText = `Status: Connecting to device ${index}...`;
+        fetch(`/api/bt/connect/${index}`, { method: 'POST' });
+    }
+
+
+    // --- Status Polling ---
+    function updateStatus() {
+        fetch('/api/status')
+            .then(response => response.json())
+            .then(data => {
+                let statusText = `State: ${data.view_state}`;
+                if (data.current_track) {
+                    statusText += ` | Now Playing: ${data.current_track}`;
+                }
+                statusDiv.innerText = statusText;
+            });
+    }
+
+    // --- Initial Load ---
+    function initialLoad() {
+      fetchSources();
+      fetchPlaylist();
+      updateStatus();
+    }
+
+    setInterval(updateStatus, 3000); // Poll status every 3 seconds
+    window.onload = initialLoad;
+
+  </script>
+</body>
+</html>

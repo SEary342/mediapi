@@ -1,14 +1,17 @@
 """Main MP3 player application."""
-import time
 import logging
+import threading
+import time
+
 from app_config import FEATURES
-from storage import Storage
 from api_clients import JellyfinClient, AudiobookshelfClient
 from local_library import LocalLibrary
 from audio import AudioPlayer
 from bluetooth import BluetoothManager
 from display import Display
 from input import InputManager
+from server import run_server
+from storage import Storage
 
 # Setup logging
 logging.basicConfig(
@@ -34,6 +37,10 @@ class MP3Player:
         self.input = InputManager(use_hardware=use_hardware)
         self.audio = AudioPlayer()
         self.storage = Storage()
+
+        # Start the web server in a background thread
+        server_thread = threading.Thread(target=run_server, args=(self,), daemon=True)
+        server_thread.start()
 
         # App state
         self.playlist = []
@@ -67,6 +74,27 @@ class MP3Player:
                 logger.debug("Auto-connect skipped or failed")
 
         logger.info("MP3 Player initialized successfully")
+
+    def play(self):
+        """Play the current track."""
+        if self.view_state == "PLAYING":
+            self.audio.play()
+
+    def pause(self):
+        """Pause the current track."""
+        if self.view_state == "PLAYING":
+            self.audio.pause()
+
+    def next(self):
+        """Go to the next track."""
+        if self.view_state == "PLAYING":
+            self.play_selection((self.current_index + 1) % len(self.playlist))
+
+    def previous(self):
+        """Go to the previous track."""
+        if self.view_state == "PLAYING":
+            self.play_selection((self.current_index - 1) % len(self.playlist))
+
 
     # --- Content Loading ---
     def load_jellyfin(self):

@@ -15,4 +15,5 @@ dependencies = [
     "requests>=2.32.5",
     "RPi.GPIO>=0.7.1; platform_machine == 'aarch64' or platform_machine == 'armv7l'",
     "python-dotenv>=1.2.1",
+    "flask>=3.1.3",
 ]
