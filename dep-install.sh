@@ -1,40 +1,39 @@
 #!/bin/bash
 set -e
 
-echo "--- 🔄 Updating System ---"
-sudo apt update && sudo apt upgrade -y
+# Identify the actual user even if running as sudo
+REAL_USER="${SUDO_USER:-$(whoami)}"
+REAL_HOME=$(eval echo ~$REAL_USER)
 
-echo "--- 🔊 Installing VLC and Core Audio Libraries ---"
-sudo apt install -y vlc libvlc-dev vlc-plugin-base
+echo "--- 🔄 Updating System (as root) ---"
+apt update && apt upgrade -y
 
-echo "--- ⚡ Installing Bluetooth & PipeWire Support ---"
-# We swap pulseaudio for pipewire-audio and wireplumber
-sudo apt install -y bluez bluetooth pipewire-audio pipewire-pulse wireplumber libspa-0.2-bluetooth
+echo "--- 🔊 Installing Audio & Bluetooth (as root) ---"
+apt install -y vlc libvlc-dev vlc-plugin-base bluez bluetooth \
+    pipewire-audio pipewire-pulse wireplumber libspa-0.2-bluetooth \
+    python3-dev build-essential libasound2-dev curl
 
-echo "--- 🛠️ Installing Python Build Essentials ---"
-sudo apt install -y python3-dev build-essential libasound2-dev
+echo "--- 👤 Setting Permissions for $REAL_USER ---"
+usermod -aG audio $REAL_USER
+usermod -aG bluetooth $REAL_USER
+usermod -aG lp $REAL_USER
 
-echo "--- 👤 Setting Permissions ---"
-# Added 'lp' group which is often required for Bluetooth communication in BlueZ
-sudo usermod -aG audio $USER
-sudo usermod -aG bluetooth $USER
-sudo usermod -aG lp $USER
-
-echo "--- 🐍 Installing uv for $USER ---"
-if ! command -v uv &> /dev/null; then
-    curl -LsSf https://astral.sh/uv/install.sh | sh
+echo "--- 🐍 Installing uv for $REAL_USER ---"
+# We run the installer AS the real user
+if ! sudo -u "$REAL_USER" command -v uv &> /dev/null; then
+    sudo -u "$REAL_USER" bash -c "curl -LsSf https://astral.sh/uv/install.sh | sh"
 fi
 
-export PATH="$HOME/.local/bin:$PATH"
-
+# Sync the project AS the real user
+export PATH="$REAL_HOME/.local/bin:$PATH"
 if [ -f "pyproject.toml" ]; then
-    uv sync
-else
-    echo "⚠️ No pyproject.toml found. Skipping uv sync."
+    echo "--- 📦 Syncing Python environment ---"
+    sudo -u "$REAL_USER" bash -c "export PATH=\"$REAL_HOME/.local/bin:\$PATH\" && uv sync"
 fi
 
-# Enable PipeWire user services for the current user
-systemctl --user enable pipewire pipewire-pulse wireplumber
+echo "--- 🔊 Enabling PipeWire for $REAL_USER ---"
+# This fix solves the "DBUS_SESSION_BUS_ADDRESS" error
+USER_ID=$(id -u "$REAL_USER")
+sudo -u "$REAL_USER" XDG_RUNTIME_DIR="/run/user/$USER_ID" systemctl --user enable pipewire pipewire-pulse wireplumber || true
 
-echo "--- ✅ Done! ---"
-echo "👉 IMPORTANT: Please REBOOT your Pi now to switch to PipeWire and apply permissions."
+echo "--- ✅ Dependencies Done! ---"
