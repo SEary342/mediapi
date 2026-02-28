@@ -3,8 +3,9 @@ set -e
 
 # Get absolute info
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CURRENT_USER=$(whoami)
-USER_HOME=$HOME
+# Use SUDO_USER if running with sudo, otherwise use whoami
+CURRENT_USER="${SUDO_USER:-$(whoami)}"
+USER_HOME=$(eval echo ~$CURRENT_USER)
 
 echo "🚀 Installing MediAPI Player Service for $CURRENT_USER..."
 echo "📁 Project directory: $PROJECT_DIR"
@@ -12,7 +13,7 @@ echo "🏠 User home: $USER_HOME"
 
 # 1. Run the dependency script
 chmod +x "$PROJECT_DIR/dep-install.sh"
-"$PROJECT_DIR/dep-install.sh"
+#"$PROJECT_DIR/dep-install.sh"
 
 # 2. Find uv executable
 if command -v uv &> /dev/null; then
@@ -104,11 +105,7 @@ TimeoutStopSec=10
 WantedBy=multi-user.target
 EOF
 
-# 6. Set correct permissions on project directory
-echo "🔐 Setting directory permissions..."
-sudo chown -R "$CURRENT_USER:$CURRENT_USER" "$PROJECT_DIR" || true
-
-# 7. Activate the service
+# 6. Activate the service
 echo "🔄 Reloading systemd and starting service..."
 sudo systemctl daemon-reload
 sudo systemctl enable mediapi.service
@@ -120,7 +117,7 @@ else
     echo "⚠️  Service start had issues. Checking logs..."
 fi
 
-# 8. Show status and next steps
+# 7. Show status and next steps
 echo ""
 echo "════════════════════════════════════════════════════════════"
 echo "✅ Installation Complete!"
