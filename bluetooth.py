@@ -14,7 +14,7 @@ class BluetoothManager:
                 cmd, shell=True, capture_output=True, text=True, timeout=15
             )
             return res.returncode == 0, res.stdout.strip()
-        except:
+        except:  # noqa: E722
             return False, ""
 
     @staticmethod
@@ -52,9 +52,9 @@ class BluetoothManager:
         BluetoothManager._run_cmd(f"bluetoothctl --timeout {timeout} scan on")
         _, out = BluetoothManager._run_cmd("bluetoothctl devices")
         return [
-            {"mac": l.split()[1], "name": l.split(" ", 2)[2]}
-            for l in out.split("\n")
-            if l.startswith("Device")
+            {"mac": x.split()[1], "name": x.split(" ", 2)[2]}
+            for x in out.split("\n")
+            if x.startswith("Device")
         ]
 
     @staticmethod

@@ -18,7 +18,7 @@ class InputManager:
         }
 
         if use_hardware:
-            import RPi.GPIO as GPIO
+            import RPi.GPIO as GPIO  # ty:ignore[unresolved-import]
 
             self.GPIO = GPIO
             GPIO.setmode(GPIO.BCM)
@@ -36,7 +36,7 @@ class InputManager:
         if pin is None:
             return False
 
-        return self.GPIO.input(pin) == 0
+        return self.GPIO.input(pin) == 0  # ty:ignore[unresolved-attribute]
 
     def cleanup(self):
         """Clean up GPIO resources."""

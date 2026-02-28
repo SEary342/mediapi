@@ -54,6 +54,7 @@ class MP3Player:
         self.view_state = "MENU"
         self.menu_options = []
         self.is_user_paused = False
+        self.track_start_time = 0
 
         # Build menu based on features
         if FEATURES["JELLYFIN"]:
@@ -162,6 +163,7 @@ class MP3Player:
             self.audio.set_time(bookmark)
 
         self.view_state = "PLAYING"
+        self.track_start_time = time.time()
 
     def save_bookmark(self):
         """Save current playback position."""
@@ -320,8 +322,8 @@ class MP3Player:
                 self.scroll_index = min(limit - 1, self.scroll_index + 1)
             time.sleep(0.15)
 
-        # SELECTION (PRESS or KEY2)
-        if self.input.is_pressed("PRESS") or self.input.is_pressed("KEY2"):
+        # SELECTION (PRESS)
+        if self.input.is_pressed("PRESS"):
             if self.view_state == "MENU":
                 choice = self.menu_options[self.scroll_index]
                 if choice == "Jellyfin":
@@ -356,6 +358,26 @@ class MP3Player:
             self.view_state, self.scroll_index = "MENU", 0
             time.sleep(0.3)
 
+        if self.input.is_pressed("KEY2"):
+            if self.view_state == "PLAYING":
+                self.next()
+            elif self.view_state == "BROWSER":
+                self.play_selection(self.scroll_index)
+            time.sleep(0.3)
+
+        if self.input.is_pressed("KEY3"):
+            if self.view_state == "PLAYING":
+                # If track started recently (within 3 seconds), go to previous track
+                # Otherwise, restart the current track
+                elapsed = time.time() - self.track_start_time
+                if elapsed < 3:
+                    self.previous()
+                else:
+                    self.audio.set_time(0)
+            elif self.view_state == "BROWSER":
+                self.play_selection(self.scroll_index)
+            time.sleep(0.3)
+
         # LEFT/RIGHT (Skip/Letter Jump)
         if self.input.is_pressed("LEFT"):
             if self.view_state == "BROWSER":
@@ -366,7 +388,6 @@ class MP3Player:
             time.sleep(0.2)
 
         if self.input.is_pressed("RIGHT"):
-            logger.error(f"RIGHT button pressed in state {self.view_state}")
             if self.view_state == "BROWSER":
                 self.jump_to_letter(1)
             elif self.view_state == "PLAYING":

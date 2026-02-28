@@ -17,7 +17,6 @@ FEATURES = {
 JELLYFIN = {
     "url": os.getenv("JELLYFIN_URL", "http://YOUR_IP:8096"),
     "api": os.getenv("JELLYFIN_API_KEY", "YOUR_KEY"),
-    "user": os.getenv("JELLYFIN_USER_ID", "YOUR_ID"),
 }
 
 # Audiobookshelf configuration
