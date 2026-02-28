@@ -20,7 +20,7 @@ echo "📦 Installing system packages (including build tools for lgpio)..."
 sudo apt install -y vlc libvlc-dev vlc-plugin-base bluez bluetooth \
     pulseaudio pulseaudio-module-bluetooth \
     python3-dev build-essential libasound2-dev curl dbus-user-session \
-    swig liblgpio-dev
+    swig liblgpio-dev libcap2-bin
 
 # --- 4. Permissions ---
 echo "👤 Setting hardware permissions for $REAL_USER..."
