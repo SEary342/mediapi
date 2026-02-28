@@ -2,48 +2,143 @@
 set -e
 
 # Get absolute info
-PROJECT_DIR=$(pwd)
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CURRENT_USER=$(whoami)
 USER_HOME=$HOME
 
-echo "🚀 Installing Media Player Service for $CURRENT_USER..."
+echo "🚀 Installing MediAPI Player Service for $CURRENT_USER..."
+echo "📁 Project directory: $PROJECT_DIR"
+echo "🏠 User home: $USER_HOME"
 
 # 1. Run the dependency script
-chmod +x dep-install.sh
-./dep-install.sh
+chmod +x "$PROJECT_DIR/dep-install.sh"
+"$PROJECT_DIR/dep-install.sh"
 
-# 2. Define the exact UV path
-# We hardcode the home path here to prevent systemd path-resolve issues
-UV_PATH="$USER_HOME/.local/bin/uv"
+# 2. Find Python executable in venv
+if [ -f "$PROJECT_DIR/.venv/bin/python" ]; then
+    PYTHON_PATH="$PROJECT_DIR/.venv/bin/python"
+    echo "✓ Found venv Python: $PYTHON_PATH"
+elif [ -f "$PROJECT_DIR/.venv/bin/python3" ]; then
+    PYTHON_PATH="$PROJECT_DIR/.venv/bin/python3"
+    echo "✓ Found venv Python3: $PYTHON_PATH"
+else
+    echo "❌ ERROR: Could not find Python in venv!"
+    echo "   Expected: $PROJECT_DIR/.venv/bin/python"
+    exit 1
+fi
 
-echo "🔧 Creating systemd service with path: $UV_PATH"
+# 3. Verify .env file exists
+if [ ! -f "$PROJECT_DIR/.env" ]; then
+    echo "⚠️  WARNING: .env file not found!"
+    echo "   Creating template .env file..."
+    cat > "$PROJECT_DIR/.env" <<'ENVEOF'
+# Jellyfin Configuration
+JELLYFIN_URL=http://YOUR_JELLYFIN_SERVER:8096
+JELLYFIN_API_KEY=YOUR_API_KEY
+JELLYFIN_USER_ID=YOUR_USERNAME_OR_UUID
 
-# 3. Create the service file
-sudo tee /etc/systemd/system/player.service > /dev/null <<EOF
+# Audiobookshelf Configuration
+ABS_URL=http://YOUR_ABS_SERVER:8000
+ABS_API_KEY=YOUR_API_KEY
+ABS_LIB_ID=YOUR_LIB_ID
+ENVEOF
+    echo "   ✓ Created .env template at $PROJECT_DIR/.env"
+    echo "   ⚠️  Please edit .env with your server details before starting!"
+fi
+
+# 4. Create the systemd service file
+echo "🔧 Creating systemd service: mediapi.service"
+
+sudo tee /etc/systemd/system/mediapi.service > /dev/null <<EOF
 [Unit]
-Description=Media Player Service
-After=network.target sound.target bluetooth.target
+Description=MediAPI - Music Player Service
+After=network-online.target bluetooth.target pulseaudio.service
+Wants=network-online.target
+Requires=bluetooth.target
 
 [Service]
-WorkingDirectory=$PROJECT_DIR
-ExecStart=$UV_PATH run player.py
-Restart=always
-RestartSec=5
+# Run as current user
 User=$CURRENT_USER
-Group=audio
-Environment=PYTHONUNBUFFERED=1
-# Important for local uv installations:
-Environment=PATH=$USER_HOME/.local/bin:/usr/local/bin:/usr/bin:/bin
+Group=$CURRENT_USER
+
+# Working directory
+WorkingDirectory=$PROJECT_DIR
+
+# Start command - disable auto_connect_bt for systemd to avoid startup delays
+ExecStart=$PYTHON_PATH -c "from player import MP3Player; app = MP3Player(use_hardware=True, auto_connect_bt=False); app.run()"
+
+# Restart policy
+Restart=on-failure
+RestartSec=10
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=mediapi
+
+# Set proper environment for Bluetooth/PulseAudio
+Environment="DBUS_SYSTEM_BUS_ADDRESS=unix:path=/run/dbus/system_bus_socket"
+Environment="PULSE_DBUS_SERVER=unix:path=/run/pulse/dbus"
+Environment="PYTHONUNBUFFERED=1"
+
+# Allow access to hardware (GPIO, SPI, etc.)
+SupplementaryGroups=gpio spi i2c dialout audio
+
+# Device access
+DevicePolicy=auto
+
+# Type
+Type=simple
+
+# Timeouts
+TimeoutStartSec=60
+TimeoutStopSec=10
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-# 4. Final Activation
-echo "🔄 Reloading and starting..."
-sudo systemctl unmask player.service
-sudo systemctl daemon-reload
-sudo systemctl enable player.service
-sudo systemctl restart player.service
+# 5. Set correct permissions on project directory
+echo "🔐 Setting directory permissions..."
+sudo chown -R "$CURRENT_USER:$CURRENT_USER" "$PROJECT_DIR" || true
 
-echo "✅ Installation Complete! Check logs with: journalctl -u player.service -f"
+# 6. Activate the service
+echo "🔄 Reloading systemd and starting service..."
+sudo systemctl daemon-reload
+sudo systemctl enable mediapi.service
+
+# Try to start the service
+if sudo systemctl start mediapi.service; then
+    echo "✅ Service started successfully!"
+else
+    echo "⚠️  Service start had issues. Checking logs..."
+fi
+
+# 7. Show status and next steps
+echo ""
+echo "════════════════════════════════════════════════════════════"
+echo "✅ Installation Complete!"
+echo "════════════════════════════════════════════════════════════"
+echo ""
+echo "📋 Service Information:"
+echo "   • Service name: mediapi"
+echo "   • User: $CURRENT_USER"
+echo "   • Project: $PROJECT_DIR"
+echo "   • Python: $PYTHON_PATH"
+echo ""
+echo "🔍 Useful Commands:"
+echo "   • Check status:  sudo systemctl status mediapi"
+echo "   • View logs:     sudo journalctl -u mediapi -f"
+echo "   • Stop service:  sudo systemctl stop mediapi"
+echo "   • Restart:       sudo systemctl restart mediapi"
+echo "   • Disable:       sudo systemctl disable mediapi"
+echo ""
+echo "⚙️  Configuration:"
+echo "   • Edit config:   nano $PROJECT_DIR/.env"
+echo "   • After changes: sudo systemctl restart mediapi"
+echo ""
+echo "📝 First Steps:"
+echo "   1. Edit $PROJECT_DIR/.env with your server details"
+echo "   2. Run: sudo systemctl restart mediapi"
+echo "   3. Check logs: sudo journalctl -u mediapi -f"
+echo ""
