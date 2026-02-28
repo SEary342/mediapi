@@ -11,7 +11,7 @@ echo "--- 🔊 Installing VLC and Core Audio Libraries ---"
 sudo apt install -y vlc libvlc-dev vlc-plugin-base
 
 echo "--- ⚡ Installing Bluetooth & PulseAudio Support ---"
-sudo apt install -y pulseaudio pulseaudio-module-bluetooth bluez bluetooth
+sudo apt install -y pulseaudio pulseaudio-module-bluetooth bluez bluetooth pipewire-audio
 
 echo "--- 🛠️ Installing Python Build Essentials ---"
 sudo apt install -y python3-dev build-essential libasound2-dev

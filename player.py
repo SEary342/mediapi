@@ -5,6 +5,7 @@ import requests
 import random
 import os
 import json
+import subprocess
 import RPi.GPIO as GPIO
 from PIL import Image, ImageDraw, ImageFont
 
@@ -28,7 +29,7 @@ class MP3Player:
         self.draw = ImageDraw.Draw(self.image)
         self.font = ImageFont.load_default()
 
-        # 2. Setup GPIO Buttons (Waveshare 1.44" BCM Pins)
+        # 2. Setup GPIO Buttons
         GPIO.setmode(GPIO.BCM)
         self.pins = {
             "UP": 6,
@@ -43,12 +44,15 @@ class MP3Player:
         for pin in self.pins.values():
             GPIO.setup(pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 
-        # 3. Audio Setup
-        self.instance = vlc.Instance("--no-video", "--network-caching=3000")
+        # 3. Audio Setup (Forcing PulseAudio/PipeWire output)
+        self.instance = vlc.Instance(
+            "--no-video", "--network-caching=3000", "--aout=pulse"
+        )
         self.player = self.instance.media_player_new()
 
         # 4. App State
         self.playlist = []
+        self.bt_devices = []
         self.current_index = 0
         self.scroll_index = 0
         self.view_state = "MENU"
@@ -58,15 +62,14 @@ class MP3Player:
         if FEATURES["ABS"]:
             self.menu_options.append("Audiobookshelf")
         if FEATURES["LOCAL"]:
-            self.menu_options.append("Local Files")
-            self.menu_options.append("Local Shuffle")
+            self.menu_options.extend(["Local Files", "Local Shuffle"])
         if FEATURES["BT_PAIR"]:
             self.menu_options.append("Bluetooth Pair")
 
         self.bookmarks = self.load_bookmarks()
         self.last_save_time = time.time()
 
-    # --- Persistence ---
+    # --- Persistence & Loaders (Abbreviated for brevity, remains same as previous) ---
     def load_bookmarks(self):
         if os.path.exists(BOOKMARK_FILE):
             try:
@@ -85,7 +88,6 @@ class MP3Player:
                 with open(BOOKMARK_FILE, "w") as f:
                     json.dump(self.bookmarks, f)
 
-    # --- Loaders ---
     def load_jellyfin(self):
         url = f"{JELLYFIN['url']}/Users/{JELLYFIN['user']}/Items?IncludeItemTypes=Audio&Recursive=True&SortBy=SortName&api_key={JELLYFIN['api']}"
         try:
@@ -94,10 +96,9 @@ class MP3Player:
                 {"name": i["Name"], "id": i["Id"], "source": "JELLY"}
                 for i in r.get("Items", [])
             ]
-            self.view_state = "BROWSER"
-            self.scroll_index = 0
+            self.view_state, self.scroll_index = "BROWSER", 0
         except:
-            self.draw_error("Jellyfin Link Fail")
+            self.draw_error("Jellyfin Fail")
 
     def load_abs(self):
         headers = {"Authorization": f"Bearer {ABS['api']}"}
@@ -112,50 +113,45 @@ class MP3Player:
                 }
                 for i in r.get("results", [])
             ]
-            self.view_state = "BROWSER"
-            self.scroll_index = 0
+            self.view_state, self.scroll_index = "BROWSER", 0
         except:
-            self.draw_error("ABS Link Fail")
+            self.draw_error("ABS Fail")
 
     def load_local(self, shuffle=False):
-        try:
-            if not os.path.exists(LOCAL_PATH):
-                os.makedirs(LOCAL_PATH)
-            files = [
-                f
-                for f in os.listdir(LOCAL_PATH)
-                if f.lower().endswith((".mp3", ".m4a", ".wav"))
-            ]
-            if not files:
-                self.draw_error("No Local Files")
-                return
-            self.playlist = [
-                {"name": f, "path": os.path.join(LOCAL_PATH, f), "source": "LOCAL"}
-                for f in sorted(files)
-            ]
-            if shuffle:
-                random.shuffle(self.playlist)
-                self.play_selection(0)
-            else:
-                self.view_state = "BROWSER"
-                self.scroll_index = 0
-        except:
-            self.draw_error("Local Path Error")
+        if not os.path.exists(LOCAL_PATH):
+            os.makedirs(LOCAL_PATH)
+        files = [
+            f
+            for f in os.listdir(LOCAL_PATH)
+            if f.lower().endswith((".mp3", ".m4a", ".wav"))
+        ]
+        if not files:
+            self.draw_error("No Local Files")
+            return
+        self.playlist = [
+            {"name": f, "path": os.path.join(LOCAL_PATH, f), "source": "LOCAL"}
+            for f in sorted(files)
+        ]
+        if shuffle:
+            random.shuffle(self.playlist)
+            self.play_selection(0)
+        else:
+            self.view_state, self.scroll_index = "BROWSER", 0
 
     def jump_to_letter(self, direction):
         if not self.playlist or self.view_state != "BROWSER":
             return
-        current_char = self.playlist[self.scroll_index]["name"][0].upper()
+        curr = self.playlist[self.scroll_index]["name"][0].upper()
         if direction == 1:
             for i in range(self.scroll_index + 1, len(self.playlist)):
-                if self.playlist[i]["name"][0].upper() > current_char:
+                if self.playlist[i]["name"][0].upper() > curr:
                     self.scroll_index = i
                     return
         else:
             for i in range(self.scroll_index - 1, -1, -1):
-                if self.playlist[i]["name"][0].upper() < current_char:
-                    target = self.playlist[i]["name"][0].upper()
-                    while i > 0 and self.playlist[i - 1]["name"][0].upper() == target:
+                if self.playlist[i]["name"][0].upper() < curr:
+                    t = self.playlist[i]["name"][0].upper()
+                    while i > 0 and self.playlist[i - 1]["name"][0].upper() == t:
                         i -= 1
                     self.scroll_index = i
                     return
@@ -164,11 +160,10 @@ class MP3Player:
         self.save_bookmark()
         self.current_index = index
         item = self.playlist[index]
-        if item["source"] == "LOCAL":
-            uri = item["path"]
-        elif item["source"] == "JELLY":
+        uri = item["path"] if item["source"] == "LOCAL" else ""
+        if item["source"] == "JELLY":
             uri = f"{JELLYFIN['url']}/Audio/{item['id']}/stream?static=true&api_key={JELLYFIN['api']}"
-        elif item["source"] == "ABS":
+        if item["source"] == "ABS":
             uri = f"{ABS['url']}/api/items/{item['id']}/play?token={ABS['api']}"
 
         self.player.set_media(self.instance.media_new(uri))
@@ -178,7 +173,72 @@ class MP3Player:
             self.player.set_time(self.bookmarks[item["name"]])
         self.view_state = "PLAYING"
 
-    # --- UI Rendering ---
+    # --- Bluetooth Logic ---
+    def draw_message(self, title, msg, color="BLUE"):
+        self.draw.rectangle((0, 0, 128, 128), fill=color)
+        self.draw.text((10, 45), title, fill="WHITE")
+        self.draw.text((10, 65), msg[:18], fill="WHITE")
+        self.disp.LCD_ShowImage(self.image, 0, 0)
+
+    def scan_bluetooth(self):
+        self.draw_message("BLUETOOTH", "Scanning (5s)...")
+        os.system("bluetoothctl power on")
+        os.system("bluetoothctl --timeout 5 scan on")
+        result = subprocess.run(
+            ["bluetoothctl", "devices"], capture_output=True, text=True
+        )
+        devices = []
+        for line in result.stdout.split("\n"):
+            if line.startswith("Device"):
+                parts = line.split(" ", 2)
+                if len(parts) >= 3:
+                    devices.append({"mac": parts[1], "name": parts[2]})
+
+        if not devices:
+            self.draw_error("No BT Devices")
+            self.view_state = "MENU"
+        else:
+            self.bt_devices = devices
+            self.view_state, self.scroll_index = "BT_SCAN", 0
+
+    def connect_bluetooth(self, index):
+        device = self.bt_devices[index]
+        mac = device["mac"]
+        self.draw_message("CONNECTING", device["name"])
+
+        # Connection sequence
+        os.system(f"bluetoothctl pair {mac}")
+        time.sleep(1)
+        os.system(f"bluetoothctl trust {mac}")
+        time.sleep(1)
+        os.system(f"bluetoothctl connect {mac}")
+        time.sleep(2)  # Wait for Pulse/Pipewire to recognize the new sink
+
+        # --- ROUTING AUDIO ---
+        # Look for the new bluetooth sink and set it as default
+        try:
+            # Find the sink name that contains the MAC address (formatted with underscores)
+            sink_mac = mac.replace(":", "_")
+            result = subprocess.run(
+                ["pactl", "list", "short", "sinks"], capture_output=True, text=True
+            )
+            for line in result.stdout.split("\n"):
+                if sink_mac in line:
+                    sink_name = line.split("\t")[1]
+                    os.system(f"pactl set-default-sink {sink_name}")
+                    # Move currently playing stream to the new sink (if playing)
+                    os.system(
+                        f"pactl list short sink-inputs | cut -f1 | xargs -I{{}} pactl move-sink-input {{}} {sink_name}"
+                    )
+                    break
+        except:
+            pass
+
+        self.draw_message("SUCCESS", "Audio Routed!", color="GREEN")
+        time.sleep(2)
+        self.view_state, self.scroll_index = "MENU", 0
+
+    # --- UI Rendering & Input (Standard logic with BT_SCAN state added) ---
     def draw_error(self, msg):
         self.draw.rectangle((0, 0, 128, 128), fill="RED")
         self.draw.text((10, 50), "ERROR:", fill="WHITE")
@@ -202,10 +262,21 @@ class MP3Player:
                 if idx < len(self.playlist):
                     is_bk = "*" if self.playlist[idx]["name"] in self.bookmarks else ""
                     color = "WHITE" if idx == self.scroll_index else "GRAY"
-                    name = f"{is_bk}{self.playlist[idx]['name'][:14]}"
                     self.draw.text(
                         (10, 25 + (i * 18)),
-                        f"> {name}" if idx == self.scroll_index else name,
+                        f"{is_bk}{self.playlist[idx]['name'][:14]}",
+                        fill=color,
+                    )
+        elif self.view_state == "BT_SCAN":
+            self.draw.text((5, 5), "-- DEVICES --", fill="MAGENTA")
+            start = max(0, self.scroll_index - 2)
+            for i in range(5):
+                idx = start + i
+                if idx < len(self.bt_devices):
+                    color = "WHITE" if idx == self.scroll_index else "GRAY"
+                    self.draw.text(
+                        (10, 25 + (i * 18)),
+                        self.bt_devices[idx]["name"][:14],
                         fill=color,
                     )
         elif self.view_state == "PLAYING":
@@ -219,9 +290,8 @@ class MP3Player:
                 self.draw.rectangle((10, 75, 10 + bar, 80), fill="BLUE")
         self.disp.LCD_ShowImage(self.image, 0, 0)
 
-    # --- Input Handling ---
     def handle_input(self):
-        # Navigation
+        # UP/DOWN Navigation
         if GPIO.input(self.pins["UP"]) == 0:
             self.scroll_index = max(0, self.scroll_index - 1)
             time.sleep(0.15)
@@ -229,42 +299,46 @@ class MP3Player:
             limit = (
                 len(self.menu_options)
                 if self.view_state == "MENU"
-                else len(self.playlist)
+                else (
+                    len(self.playlist)
+                    if self.view_state == "BROWSER"
+                    else len(self.bt_devices)
+                )
             )
             if limit > 0:
                 self.scroll_index = min(limit - 1, self.scroll_index + 1)
             time.sleep(0.15)
 
-        # Selection (Center or Key 2)
+        # SELECTION
         if GPIO.input(self.pins["PRESS"]) == 0 or GPIO.input(self.pins["KEY2"]) == 0:
             if self.view_state == "MENU":
                 choice = self.menu_options[self.scroll_index]
-                if choice == "Jellyfin":
+                if "Jellyfin" in choice:
                     self.load_jellyfin()
-                elif choice == "Audiobookshelf":
+                elif "Audiobook" in choice:
                     self.load_abs()
-                elif choice == "Local Files":
+                elif "Local Files" in choice:
                     self.load_local(False)
-                elif choice == "Local Shuffle":
+                elif "Shuffle" in choice:
                     self.load_local(True)
-                elif choice == "Bluetooth Pair":
-                    os.system("bluetoothctl discoverable on")
-                    self.draw_error("BT Discovery ON")
+                elif "Bluetooth" in choice:
+                    self.scan_bluetooth()
             elif self.view_state == "BROWSER":
                 self.play_selection(self.scroll_index)
+            elif self.view_state == "BT_SCAN":
+                self.connect_bluetooth(self.scroll_index)
             elif self.view_state == "PLAYING":
                 self.player.pause()
                 self.save_bookmark()
             time.sleep(0.3)
 
-        # Back (Key 1)
+        # BACK
         if GPIO.input(self.pins["KEY1"]) == 0:
             self.save_bookmark()
-            self.view_state = "MENU"
-            self.scroll_index = 0
+            self.view_state, self.scroll_index = "MENU", 0
             time.sleep(0.3)
 
-        # Jump Letter / Skip 30s
+        # LEFT/RIGHT (Skip/Letter Jump)
         if GPIO.input(self.pins["LEFT"]) == 0:
             if self.view_state == "BROWSER":
                 self.jump_to_letter(-1)
