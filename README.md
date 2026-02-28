@@ -2,6 +2,8 @@
 
 A portable music player for Raspberry Pi with support for multiple audio sources including Jellyfin, Audiobookshelf, and local files. Features a 1.44" LCD display, Bluetooth audio routing, and intuitive joystick controls.
 
+![MediaPI Project](project.jpg)
+
 ## Features
 
 - **Multi-Source Support**
@@ -39,32 +41,26 @@ A portable music player for Raspberry Pi with support for multiple audio sources
 
 ## Hardware Requirements
 
-- Raspberry Pi (tested on Pi 4 and Pi Zero)
-- 1.44" SPI LCD display (ST7735 controller)
-- USB audio interface or headphone jack
-- Joystick/input buttons for control
-- Optional: Bluetooth adapter for audio routing
+- **Raspberry Pi**: Pi Zero 2 W (recommended), Pi 4, or similar
+- **Display**: [Waveshare 1.44" LCD HAT](https://www.waveshare.com/wiki/1.44inch_LCD_HAT?srsltid=AfmBOoqppbzVhhQBaLMlc1WAQhcLNHTrObki1UQcGMSaaRTbj-OkJhtu) with ST7735 controller
+- **Case**: [SnapBox 3D printed case for Pi Zero with Waveshare LCD 1.44"](https://www.printables.com/model/302312-snapbox-raspberry-pi-zero-waveshare-lcd-144-resin)
+- **Audio**: Bluetooth audio device (headphones, speakers, etc)
+- **Input**: Joystick and buttons (integrated with LCD HAT)
 
 ## Installation
 
-1. Clone the repository:
+1. Clone the repository (on your Pi):
 ```bash
 git clone https://github.com/SEary342/mediapi.git
 cd mediapi
 ```
 
-2. Create and activate virtual environment:
+2. Install the service:
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
+bash install.sh
 ```
 
-3. Install dependencies:
-```bash
-pip install -r requirements.txt
-```
-
-4. Configure your sources in `.env`:
+3. Configure your sources in `.env` (get your api keys from Jellyfin and ABS):
 ```
 # Jellyfin
 JELLYFIN_URL=http://your-jellyfin-server:8096
@@ -74,15 +70,14 @@ JELLYFIN_API_KEY=your_api_key
 ABS_URL=http://your-abs-server:80
 ABS_API_KEY=your_api_key
 ABS_LIB_ID=library_id
-
-# Local files
-LOCAL_PATH=/path/to/audio/files
 ```
 
-5. Run the application:
+5. Reboot your Pi:
 ```bash
-python3 player.py
+sudo reboot
 ```
+
+6. If you are a developer, the ~/mediapi directory contains the application and `uv` manages the dependencies. You can run the app with `uv run player.py`. Note that the web server won't be accessible in this mode without changing the port in `server.py`.
 
 ## Controls
 
