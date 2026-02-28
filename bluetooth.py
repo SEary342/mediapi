@@ -12,7 +12,7 @@ class BluetoothManager:
 
     @staticmethod
     def _run_cmd(cmd, timeout=10):
-        """Run a shell command safely, returns success status."""
+        """Run a shell command safely, returns (success, output, error)."""
         try:
             result = subprocess.run(
                 cmd,
@@ -21,15 +21,16 @@ class BluetoothManager:
                 capture_output=True,
                 text=True,
             )
-            if result.returncode != 0 and result.stderr:
-                logger.warning(f"Command '{cmd}' failed: {result.stderr}")
-            return result.returncode == 0
+            success = result.returncode == 0
+            if not success and result.stderr:
+                logger.debug(f"Command '{cmd}' failed with: {result.stderr.strip()}")
+            return success, result.stdout.strip(), result.stderr.strip()
         except subprocess.TimeoutExpired:
-            logger.warning(f"Command '{cmd}' timed out after {timeout}s")
-            return False
+            logger.debug(f"Command '{cmd}' timed out after {timeout}s")
+            return False, "", f"Timeout after {timeout}s"
         except Exception as e:
             logger.error(f"Error running command '{cmd}': {e}")
-            return False
+            return False, "", str(e)
 
     @staticmethod
     def scan_devices(timeout_seconds=5):
@@ -61,17 +62,35 @@ class BluetoothManager:
         logger.info(f"Connecting to {device_name or mac_address}...")
 
         # Pair
-        BluetoothManager._run_cmd(f"bluetoothctl pair {mac_address}", timeout=10)
+        logger.debug(f"Pairing with {mac_address}...")
+        success, stdout, stderr = BluetoothManager._run_cmd(
+            f"bluetoothctl pair {mac_address}", timeout=15
+        )
+        if not success and stderr:
+            logger.warning(f"Pairing result: {stderr}")
         time.sleep(1)
 
         # Trust
-        BluetoothManager._run_cmd(f"bluetoothctl trust {mac_address}", timeout=5)
+        logger.debug(f"Trusting {mac_address}...")
+        success, stdout, stderr = BluetoothManager._run_cmd(
+            f"bluetoothctl trust {mac_address}", timeout=5
+        )
+        if not success and stderr:
+            logger.warning(f"Trust result: {stderr}")
         time.sleep(1)
 
         # Connect
-        success = BluetoothManager._run_cmd(
-            f"bluetoothctl connect {mac_address}", timeout=10
+        logger.debug(f"Initiating connection to {mac_address}...")
+        success, stdout, stderr = BluetoothManager._run_cmd(
+            f"bluetoothctl connect {mac_address}", timeout=15
         )
+        if not success:
+            if stderr:
+                logger.error(f"Connection failed: {stderr}")
+            else:
+                logger.error("Connection failed (no error details)")
+            return False
+        
         time.sleep(2)
 
         if success:
@@ -109,7 +128,7 @@ class BluetoothManager:
                 return False
 
             # Try to connect
-            success = BluetoothManager._run_cmd(
+            success, stdout, stderr = BluetoothManager._run_cmd(
                 f"bluetoothctl connect {device['mac']}", timeout=10
             )
             time.sleep(2)
@@ -141,14 +160,18 @@ class BluetoothManager:
                 if sink_mac in line:
                     sink_name = line.split("\t")[1]
                     logger.debug(f"Routing audio to sink: {sink_name}")
-                    BluetoothManager._run_cmd(
+                    success, _, stderr = BluetoothManager._run_cmd(
                         f"pactl set-default-sink {sink_name}", timeout=5
                     )
+                    if not success and stderr:
+                        logger.warning(f"Failed to set default sink: {stderr}")
                     # Move currently playing stream to the new sink (if playing)
-                    BluetoothManager._run_cmd(
+                    success, _, stderr = BluetoothManager._run_cmd(
                         f"pactl list short sink-inputs | cut -f1 | xargs -I{{}} pactl move-sink-input {{}} {sink_name}",
                         timeout=5,
                     )
+                    if not success and stderr:
+                        logger.warning(f"Failed to move sink inputs: {stderr}")
                     logger.info(f"Audio routed to {sink_name}")
                     break
         except subprocess.TimeoutExpired:
