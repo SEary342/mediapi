@@ -100,8 +100,10 @@ dependencies = [
     { name = "lgpio", marker = "platform_machine == 'aarch64' or platform_machine == 'armv7l'" },
     { name = "numpy" },
     { name = "pillow" },
+    { name = "python-dotenv" },
     { name = "python-vlc" },
     { name = "requests" },
+    { name = "rpi-gpio", marker = "platform_machine == 'aarch64' or platform_machine == 'armv7l'" },
     { name = "spidev", marker = "platform_machine == 'aarch64' or platform_machine == 'armv7l'" },
 ]
 
@@ -111,8 +113,10 @@ requires-dist = [
     { name = "lgpio", marker = "platform_machine == 'aarch64' or platform_machine == 'armv7l'", specifier = ">=0.2.2.0" },
     { name = "numpy", specifier = ">=2.4.2" },
     { name = "pillow", specifier = ">=12.1.1" },
+    { name = "python-dotenv", specifier = ">=1.2.1" },
     { name = "python-vlc", specifier = ">=3.0.21203" },
     { name = "requests", specifier = ">=2.32.5" },
+    { name = "rpi-gpio", marker = "platform_machine == 'aarch64' or platform_machine == 'armv7l'", specifier = ">=0.7.1" },
     { name = "spidev", marker = "platform_machine == 'aarch64' or platform_machine == 'armv7l'", specifier = ">=3.8" },
 ]
 
@@ -225,6 +229,15 @@ wheels = [
 ]
 
 [[package]]
+name = "python-dotenv"
+version = "1.2.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/f0/26/19cadc79a718c5edbec86fd4919a6b6d3f681039a2f6d66d14be94e75fb9/python_dotenv-1.2.1.tar.gz", hash = "sha256:42667e897e16ab0d66954af0e60a9caa94f0fd4ecf3aaf6d2d260eec1aa36ad6", size = 44221, upload-time = "2025-10-26T15:12:10.434Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/14/1b/a298b06749107c305e1fe0f814c6c74aea7b2f1e10989cb30f544a1b3253/python_dotenv-1.2.1-py3-none-any.whl", hash = "sha256:b81ee9561e9ca4004139c6cbba3a238c32b03e4894671e181b671e8cb8425d61", size = 21230, upload-time = "2025-10-26T15:12:09.109Z" },
+]
+
+[[package]]
 name = "python-vlc"
 version = "3.0.21203"
 source = { registry = "https://pypi.org/simple" }
@@ -247,6 +260,12 @@ sdist = { url = "https://files.pythonhosted.org/packages/c9/74/b3ff8e6c8446842c3
 wheels = [
     { url = "https://files.pythonhosted.org/packages/1e/db/4254e3eabe8020b458f1a747140d32277ec7a271daf1d235b70dc0b4e6e3/requests-2.32.5-py3-none-any.whl", hash = "sha256:2462f94637a34fd532264295e186976db0f5d453d1cdd31473c85a6a161affb6", size = 64738, upload-time = "2025-08-18T20:46:00.542Z" },
 ]
+
+[[package]]
+name = "rpi-gpio"
+version = "0.7.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/c4/0f/10b524a12b3445af1c607c27b2f5ed122ef55756e29942900e5c950735f2/RPi.GPIO-0.7.1.tar.gz", hash = "sha256:cd61c4b03c37b62bba4a5acfea9862749c33c618e0295e7e90aa4713fb373b70", size = 29090, upload-time = "2022-02-06T15:15:06.022Z" }
 
 [[package]]
 name = "setuptools"
