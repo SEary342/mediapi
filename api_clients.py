@@ -1,5 +1,7 @@
 """API clients for streaming services."""
 
+from utils import Source
+
 import requests
 import logging
 import jellyfin
@@ -43,7 +45,7 @@ class JellyfinClient:
         result = query.all
 
         return (
-            [dict(x) for x in result.data]
+            [{**dict(x), "source": Source.JELLYFIN.value} for x in result.data]
             if hasattr(result, "data") and result.data
             else []
         )

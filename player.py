@@ -1,4 +1,7 @@
 """Main MP3 player application."""
+
+from utils import Source
+
 import logging
 import threading
 import time
@@ -31,7 +34,7 @@ class MP3Player:
     def __init__(self, use_hardware=True, auto_connect_bt=True):
         """Initialize the MP3 player."""
         logger.info("Initializing MP3 Player...")
-        
+
         # Initialize components
         self.display = Display(use_hardware=use_hardware)
         self.input = InputManager(use_hardware=use_hardware)
@@ -95,7 +98,6 @@ class MP3Player:
         if self.view_state == "PLAYING":
             self.play_selection((self.current_index - 1) % len(self.playlist))
 
-
     # --- Content Loading ---
     def load_jellyfin(self):
         """Load playlist from Jellyfin."""
@@ -135,11 +137,11 @@ class MP3Player:
         item = self.playlist[index]
 
         # Get stream URI
-        if item["source"] == "LOCAL":
+        if item["source"] == Source.LOCAL.value:
             uri = LocalLibrary.get_stream_uri(item)
-        elif item["source"] == "JELLY":
+        elif item["source"] == Source.JELLYFIN.value:
             uri = JellyfinClient.get_stream_uri(item["id"])
-        elif item["source"] == "ABS":
+        elif item["source"] == Source.ABS.value:
             uri = AudiobookshelfClient.get_stream_uri(item["id"])
         else:
             return
@@ -252,11 +254,7 @@ class MP3Player:
             for i in range(5):
                 idx = start + i
                 if idx < len(self.playlist):
-                    is_bk = (
-                        "*"
-                        if self.playlist[idx]["name"] in self.bookmarks
-                        else ""
-                    )
+                    is_bk = "*" if self.playlist[idx]["name"] in self.bookmarks else ""
                     color = "WHITE" if idx == self.scroll_index else "GRAY"
                     self.display.draw_text(
                         10,

@@ -1,4 +1,5 @@
 """Local file library management."""
+from utils import Source
 import os
 import random
 from app_config import LOCAL_PATH
@@ -25,7 +26,7 @@ class LocalLibrary:
             return []
 
         items = [
-            {"name": f, "path": os.path.join(LOCAL_PATH, f), "source": "LOCAL"}
+            {"name": f, "path": os.path.join(LOCAL_PATH, f), "source": Source.LOCAL.value}
             for f in sorted(files)
         ]
 
