@@ -8,6 +8,10 @@ REAL_HOME=$(eval echo ~$REAL_USER)
 echo "--- 🔄 Updating System (as root) ---"
 apt update && apt upgrade -y
 
+echo "--- 🔌 Enabling SPI Interface ---"
+# Non-interactive command to enable SPI automatically (0 = enable)
+raspi-config nonint do_spi 0
+
 echo "--- 🔊 Installing Audio & Bluetooth (PulseAudio Stack) ---"
 # We explicitly install PulseAudio and remove PipeWire to prevent conflicts
 apt remove --purge -y pipewire wireplumber 2>/dev/null || true
@@ -16,9 +20,12 @@ apt install -y vlc libvlc-dev vlc-plugin-base bluez bluetooth \
     python3-dev build-essential libasound2-dev curl dbus-user-session
 
 echo "--- 👤 Setting Permissions for $REAL_USER ---"
+# Added spi and gpio groups for Waveshare LCD permissions
 usermod -aG audio $REAL_USER
 usermod -aG bluetooth $REAL_USER
 usermod -aG pulse-access $REAL_USER
+usermod -aG spi $REAL_USER
+usermod -aG gpio $REAL_USER
 
 echo "--- 🐍 Installing uv for $REAL_USER ---"
 if ! sudo -u "$REAL_USER" command -v uv &> /dev/null; then

@@ -66,8 +66,8 @@ Environment="PULSE_SERVER=unix:/run/user/$USER_ID/pulse/native"
 Environment="DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$USER_ID/bus"
 Environment="PYTHONUNBUFFERED=1"
 
-# Hardware Permissions
-SupplementaryGroups=audio bluetooth lp
+# Hardware Permissions (Added spi and gpio for the Waveshare LCD)
+SupplementaryGroups=audio bluetooth lp spi gpio
 
 [Install]
 WantedBy=multi-user.target
