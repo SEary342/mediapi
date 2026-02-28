@@ -5,6 +5,11 @@ from app_config import JELLYFIN, ABS
 
 logger = logging.getLogger(__name__)
 
+# Configurable timeouts (in seconds)
+# Increase these if your servers are slow or on unreliable networks
+JELLYFIN_TIMEOUT = 15
+ABS_TIMEOUT = 15
+
 
 class JellyfinClient:
     """Jellyfin API client."""
@@ -12,8 +17,11 @@ class JellyfinClient:
     _user_id_cache = None
 
     @staticmethod
-    def _resolve_user_id(timeout=4):
+    def _resolve_user_id(timeout=None):
         """Resolve username to user ID if needed."""
+        if timeout is None:
+            timeout = JELLYFIN_TIMEOUT
+
         if JellyfinClient._user_id_cache:
             return JellyfinClient._user_id_cache
 
@@ -53,14 +61,17 @@ class JellyfinClient:
             raise Exception(f"Failed to resolve Jellyfin user: {e}")
 
     @staticmethod
-    def get_items(timeout=4):
+    def get_items(timeout=None):
         """Fetch audio items from Jellyfin."""
+        if timeout is None:
+            timeout = JELLYFIN_TIMEOUT
+
         try:
             # Resolve user ID
             user_id = JellyfinClient._resolve_user_id(timeout=timeout)
 
             url = f"{JELLYFIN['url']}/Users/{user_id}/Items?IncludeItemTypes=Audio&Recursive=True&SortBy=SortName&api_key={JELLYFIN['api']}"
-            logger.debug(f"Fetching Jellyfin items from {JELLYFIN['url']}")
+            logger.debug(f"Fetching Jellyfin items from {JELLYFIN['url']} (timeout={timeout}s)")
             response = requests.get(url, timeout=timeout)
             response.raise_for_status()
             data = response.json()
@@ -81,6 +92,9 @@ class JellyfinClient:
             elif '401' in error_msg or 'Unauthorized' in error_msg:
                 logger.error("Jellyfin authentication failed - check API key")
                 raise Exception("Jellyfin authentication failed - check JELLYFIN_API_KEY in .env")
+            elif 'timeout' in error_msg.lower():
+                logger.error(f"Jellyfin timeout (network slow or server unresponsive). Try increasing JELLYFIN_TIMEOUT in api_clients.py: {e}")
+                raise Exception(f"Jellyfin timeout - server is slow. Try increasing JELLYFIN_TIMEOUT in the code. Error: {e}")
             else:
                 logger.error(f"Jellyfin API error: {e}")
                 raise Exception(f"Jellyfin API error: {e}")
@@ -95,12 +109,15 @@ class AudiobookshelfClient:
     """Audiobookshelf API client."""
 
     @staticmethod
-    def get_items(timeout=4):
+    def get_items(timeout=None):
         """Fetch items from Audiobookshelf."""
+        if timeout is None:
+            timeout = ABS_TIMEOUT
+
         headers = {"Authorization": f"Bearer {ABS['api']}"}
         url = f"{ABS['url']}/api/libraries/{ABS['lib_id']}/items"
         try:
-            logger.debug(f"Fetching Audiobookshelf items from {ABS['url']}")
+            logger.debug(f"Fetching Audiobookshelf items from {ABS['url']} (timeout={timeout}s)")
             response = requests.get(url, headers=headers, timeout=timeout)
             response.raise_for_status()
             data = response.json()
@@ -115,8 +132,16 @@ class AudiobookshelfClient:
             logger.info(f"Loaded {len(items)} items from Audiobookshelf")
             return items
         except requests.RequestException as e:
-            logger.error(f"Audiobookshelf API error: {e}")
-            raise Exception(f"Audiobookshelf API error: {e}")
+            error_msg = str(e)
+            if '401' in error_msg or 'Unauthorized' in error_msg:
+                logger.error("Audiobookshelf authentication failed - check API key")
+                raise Exception("Audiobookshelf authentication failed - check ABS_API_KEY in .env")
+            elif 'timeout' in error_msg.lower():
+                logger.error(f"Audiobookshelf timeout (network slow or server unresponsive). Try increasing ABS_TIMEOUT in api_clients.py: {e}")
+                raise Exception(f"Audiobookshelf timeout - server is slow. Try increasing ABS_TIMEOUT in the code. Error: {e}")
+            else:
+                logger.error(f"Audiobookshelf API error: {e}")
+                raise Exception(f"Audiobookshelf API error: {e}")
 
     @staticmethod
     def get_stream_uri(item_id):
