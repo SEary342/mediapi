@@ -17,7 +17,8 @@ echo "--- 🔊 Installing Audio & Bluetooth (PulseAudio Stack) ---"
 apt remove --purge -y pipewire wireplumber 2>/dev/null || true
 apt install -y vlc libvlc-dev vlc-plugin-base bluez bluetooth \
     pulseaudio pulseaudio-module-bluetooth \
-    python3-dev build-essential libasound2-dev curl dbus-user-session
+    python3-dev build-essential libasound2-dev curl dbus-user-session \
+    swig liblgpio-dev
 
 echo "--- 👤 Setting Permissions for $REAL_USER ---"
 # Added spi and gpio groups for Waveshare LCD permissions
