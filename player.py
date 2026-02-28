@@ -53,6 +53,7 @@ class MP3Player:
         self.scroll_index = 0
         self.view_state = "MENU"
         self.menu_options = []
+        self.is_user_paused = False
 
         # Build menu based on features
         if FEATURES["JELLYFIN"]:
@@ -139,6 +140,7 @@ class MP3Player:
         """Play a selected item."""
         self.save_bookmark()
         self.current_index = index
+        self.is_user_paused = False
         item = self.playlist[index]
 
         # Get stream URI
@@ -339,7 +341,12 @@ class MP3Player:
             elif self.view_state == "BT_SCAN":
                 self.connect_bluetooth(self.scroll_index)
             elif self.view_state == "PLAYING":
-                self.audio.pause()
+                if self.audio.is_playing():
+                    self.audio.pause()
+                    self.is_user_paused = True
+                else:
+                    self.audio.play()
+                    self.is_user_paused = False
                 self.save_bookmark()
             time.sleep(0.3)
 
@@ -363,8 +370,13 @@ class MP3Player:
                 self.jump_to_letter(1)
             elif self.view_state == "PLAYING":
                 pos = self.audio.get_time()
+                new_pos = pos + 30000
+                # Only cap to duration if duration is valid (positive)
                 duration = self.audio.get_duration()
-                self.audio.set_time(min(duration - 100, pos + 30000))
+                logger.info(f"RIGHT seek: current pos={pos}, new pos={new_pos}, duration={duration}")
+                if duration > 0:
+                    new_pos = min(duration - 100, new_pos)
+                self.audio.set_time(new_pos)
             time.sleep(0.2)
 
     def run(self):
@@ -379,7 +391,7 @@ class MP3Player:
                     self.save_bookmark()
                     self.last_save_time = time.time()
                 # Auto-play next track when current finishes
-                if self.view_state == "PLAYING" and not self.audio.is_playing():
+                if self.view_state == "PLAYING" and not self.audio.is_playing() and not self.is_user_paused:
                     if self.current_index < len(self.playlist) - 1:
                         self.next()
                     else:
