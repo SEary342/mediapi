@@ -8,32 +8,35 @@ REAL_HOME=$(eval echo ~$REAL_USER)
 echo "--- 🔄 Updating System (as root) ---"
 apt update && apt upgrade -y
 
-echo "--- 🔊 Installing Audio & Bluetooth (as root) ---"
+echo "--- 🔊 Installing Audio & Bluetooth (PulseAudio Stack) ---"
+# We explicitly install PulseAudio and remove PipeWire to prevent conflicts
+apt remove --purge -y pipewire wireplumber 2>/dev/null || true
 apt install -y vlc libvlc-dev vlc-plugin-base bluez bluetooth \
-    pipewire-audio pipewire-pulse wireplumber libspa-0.2-bluetooth \
-    python3-dev build-essential libasound2-dev curl
+    pulseaudio pulseaudio-module-bluetooth \
+    python3-dev build-essential libasound2-dev curl dbus-user-session
 
 echo "--- 👤 Setting Permissions for $REAL_USER ---"
 usermod -aG audio $REAL_USER
 usermod -aG bluetooth $REAL_USER
-usermod -aG lp $REAL_USER
+usermod -aG pulse-access $REAL_USER
 
 echo "--- 🐍 Installing uv for $REAL_USER ---"
-# We run the installer AS the real user
 if ! sudo -u "$REAL_USER" command -v uv &> /dev/null; then
     sudo -u "$REAL_USER" bash -c "curl -LsSf https://astral.sh/uv/install.sh | sh"
 fi
 
-# Sync the project AS the real user
+# Add uv to the current shell path so the rest of the script can use it
 export PATH="$REAL_HOME/.local/bin:$PATH"
+
 if [ -f "pyproject.toml" ]; then
     echo "--- 📦 Syncing Python environment ---"
     sudo -u "$REAL_USER" bash -c "export PATH=\"$REAL_HOME/.local/bin:\$PATH\" && uv sync"
 fi
 
-echo "--- 🔊 Enabling PipeWire for $REAL_USER ---"
-# This fix solves the "DBUS_SESSION_BUS_ADDRESS" error
+echo "--- 🔊 Enabling PulseAudio User Service ---"
+# Enable lingering so the user's audio daemon starts at boot
+loginctl enable-linger "$REAL_USER"
 USER_ID=$(id -u "$REAL_USER")
-sudo -u "$REAL_USER" XDG_RUNTIME_DIR="/run/user/$USER_ID" systemctl --user enable pipewire pipewire-pulse wireplumber || true
+sudo -u "$REAL_USER" XDG_RUNTIME_DIR="/run/user/$USER_ID" systemctl --user enable pulseaudio.service pulseaudio.socket || true
 
 echo "--- ✅ Dependencies Done! ---"

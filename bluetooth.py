@@ -1,5 +1,3 @@
-"""Bluetooth management optimized for PipeWire on Pi Zero."""
-
 import subprocess
 import time
 import logging
@@ -10,98 +8,56 @@ logger = logging.getLogger(__name__)
 
 class BluetoothManager:
     @staticmethod
-    def _run_cmd(cmd, timeout=15):
+    def _run_cmd(cmd):
         try:
-            result = subprocess.run(
-                cmd,
-                shell=True,
-                timeout=timeout,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
+            res = subprocess.run(
+                cmd, shell=True, capture_output=True, text=True, timeout=15
             )
-            return result.returncode == 0, result.stdout.strip()
-        except Exception as e:
-            return False, str(e)
+            return res.returncode == 0, res.stdout.strip()
+        except:
+            return False, ""
 
     @staticmethod
-    def connect(mac_address, device_name=None):
-        logger.info(f"Connecting to {device_name or mac_address}...")
-
-        # 1. Force hardware power
-        BluetoothManager._run_cmd("sudo rfkill unblock bluetooth")
+    def connect(mac, name=None):
+        logger.info(f"Connecting to {name or mac}...")
         BluetoothManager._run_cmd("bluetoothctl power on")
-
-        # 2. Connection Handshake
-        BluetoothManager._run_cmd(f"bluetoothctl trust {mac_address}")
-        success, output = BluetoothManager._run_cmd(
-            f"bluetoothctl connect {mac_address}"
-        )
+        BluetoothManager._run_cmd(f"bluetoothctl trust {mac}")
+        success, _ = BluetoothManager._run_cmd(f"bluetoothctl connect {mac}")
 
         if success:
-            logger.info("Bluetooth link established. Syncing audio engine...")
-            # THE FIX: Give the Pi Zero's CPU time to breathe!
-            time.sleep(4)
-
-            # 3. Route Audio (Simplified)
-            BluetoothManager._route_audio_aggresive()
-
-            Storage.save_last_bluetooth_device(mac_address, device_name or "Unknown")
-            return True
-        else:
-            logger.error(f"Link failed: {output}")
-            return False
-
-    @staticmethod
-    def _route_audio_aggresive():
-        """Force ANY connected BlueZ device to be the primary sink."""
-        try:
-            # Step A: Find the Sink Name using a broad filter
-            # We look for anything starting with 'bluez_output'
-            cmd = "pactl list short sinks | grep bluez_output | cut -f2"
-            _, sink_name = BluetoothManager._run_cmd(cmd)
-
-            if sink_name:
-                logger.info(f"Found Bluetooth sink: {sink_name}")
-                # Step B: Set as Default
-                BluetoothManager._run_cmd(f"pactl set-default-sink {sink_name}")
-                # Step C: Maximize Volume (PipeWire defaults to low)
-                BluetoothManager._run_cmd(f"pactl set-sink-volume {sink_name} 80%")
-                # Step D: Move any existing streams (VLC) to this speaker
-                move_cmd = (
-                    "pactl list short sink-inputs | cut -f1 | xargs -I{} pactl move-sink-input {} "
-                    + sink_name
-                )
-                BluetoothManager._run_cmd(move_cmd)
+            logger.info("Bluetooth link OK. Finding PulseAudio sink...")
+            time.sleep(4)  # Allow Pi Zero CPU to process the sink
+            if BluetoothManager._route_audio(mac):
+                Storage.save_last_bluetooth_device(mac, name or "Unknown")
                 return True
-            else:
-                # HAIL MARY: If we can't find it by name, just try to 'kick' the policy
-                logger.warning(
-                    "Sink not found by name, attempting global policy refresh..."
-                )
-                BluetoothManager._run_cmd(
-                    "wpctl set-default $(wpctl status | grep -m 1 'bluez_output' | grep -oP '\d+(?=\.)')"
-                )
-        except Exception as e:
-            logger.debug(f"Routing error: {e}")
         return False
 
     @staticmethod
-    def scan_devices(timeout_seconds=5):
-        BluetoothManager._run_cmd("bluetoothctl power on")
-        BluetoothManager._run_cmd(f"bluetoothctl --timeout {timeout_seconds} scan on")
+    def _route_audio(mac):
+        mac_fmt = mac.replace(":", "_")
+        for _ in range(5):
+            _, out = BluetoothManager._run_cmd("pactl list short sinks")
+            for line in out.split("\n"):
+                if mac_fmt in line and "bluez_sink" in line:
+                    sink = line.split("\t")[1]
+                    BluetoothManager._run_cmd(f"pactl set-default-sink {sink}")
+                    BluetoothManager._run_cmd(f"pactl set-sink-volume {sink} 80%")
+                    logger.info(f"Audio routed to {sink}")
+                    return True
+            time.sleep(2)
+        return False
+
+    @staticmethod
+    def scan_devices(timeout=5):
+        BluetoothManager._run_cmd(f"bluetoothctl --timeout {timeout} scan on")
         _, out = BluetoothManager._run_cmd("bluetoothctl devices")
-        devices = []
-        for line in out.split("\n"):
-            if line.startswith("Device"):
-                parts = line.split(" ", 2)
-                if len(parts) >= 3:
-                    devices.append({"mac": parts[1], "name": parts[2]})
-        return devices
+        return [
+            {"mac": l.split()[1], "name": l.split(" ", 2)[2]}
+            for l in out.split("\n")
+            if l.startswith("Device")
+        ]
 
     @staticmethod
     def auto_connect_last_device():
-        device = Storage.load_last_bluetooth_device()
-        if device:
-            return BluetoothManager.connect(device["mac"], device["name"])
-        return False
+        d = Storage.load_last_bluetooth_device()
+        return BluetoothManager.connect(d["mac"], d["name"]) if d else False
