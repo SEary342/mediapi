@@ -12,23 +12,22 @@ class BluetoothManager:
     """Manages Bluetooth device pairing and connection with PipeWire support."""
 
     @staticmethod
-    def _run_cmd(cmd, timeout=10):
-        """Run a shell command safely, returns (success, output, error)."""
+    def _run_cmd(cmd, timeout=15):
         try:
+            # Combine stdout and stderr to catch all messages
             result = subprocess.run(
                 cmd,
                 shell=True,
                 timeout=timeout,
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
                 text=True,
             )
             success = result.returncode == 0
-            if not success and result.stderr:
-                logger.debug(f"Command '{cmd}' failed with: {result.stderr.strip()}")
-            return success, result.stdout.strip(), result.stderr.strip()
-        except subprocess.TimeoutExpired:
-            logger.debug(f"Command '{cmd}' timed out after {timeout}s")
-            return False, "", f"Timeout after {timeout}s"
+            # Log the output even if it failed so we can see the "Reason: ..."
+            if not success:
+                logger.debug(f"Command '{cmd}' failed. Output: {result.stdout.strip()}")
+            return success, result.stdout.strip(), result.stdout.strip()
         except Exception as e:
             logger.error(f"Error running command '{cmd}': {e}")
             return False, "", str(e)
