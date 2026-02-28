@@ -61,3 +61,9 @@ class BluetoothManager:
     def auto_connect_last_device():
         d = Storage.load_last_bluetooth_device()
         return BluetoothManager.connect(d["mac"], d["name"]) if d else False
+
+    @staticmethod
+    def is_connected():
+        """Check if any Bluetooth device is currently connected."""
+        success, out = BluetoothManager._run_cmd("bluetoothctl info")
+        return "Connected: yes" in out if success else False

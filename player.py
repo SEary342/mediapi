@@ -249,6 +249,10 @@ class MP3Player:
     def render(self):
         """Render the current view."""
         self.display.clear()
+        
+        # Draw Bluetooth indicator in top-right if connected
+        if BluetoothManager.is_connected():
+            self.display.draw_text(105, 5, "BT", fill="CYAN")
 
         if self.view_state == "MENU":
             self.display.draw_text(5, 5, "-- SOURCES --", fill="YELLOW")
