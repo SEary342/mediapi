@@ -44,11 +44,15 @@ class JellyfinClient:
         # .all is a property that executes the request
         result = query.all
 
-        return (
-            [{**dict(x), "source": Source.JELLYFIN.value} for x in result.data]
-            if hasattr(result, "data") and result.data
-            else []
-        )
+        items = []
+        if hasattr(result, "data") and result.data:
+            for x in result.data:
+                item_dict = {**dict(x), "source": Source.JELLYFIN.value}
+                # Convert RunTimeTicks (100-nanosecond intervals) to milliseconds
+                if hasattr(x, "run_time_ticks") and x.run_time_ticks:
+                    item_dict["duration"] = x.run_time_ticks // 10000
+                items.append(item_dict)
+        return items
 
     @classmethod
     def get_stream_uri(cls, item_id, container="mp3"):

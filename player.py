@@ -5,6 +5,7 @@ from utils import Source
 import logging
 import threading
 import time
+import random
 
 from app_config import FEATURES
 from api_clients import JellyfinClient, AudiobookshelfClient
@@ -55,7 +56,7 @@ class MP3Player:
 
         # Build menu based on features
         if FEATURES["JELLYFIN"]:
-            self.menu_options.append("Jellyfin")
+            self.menu_options.extend(["Jellyfin", "Jellyfin Shuffle"])
         if FEATURES["ABS"]:
             self.menu_options.append("Audiobookshelf")
         if FEATURES["LOCAL"]:
@@ -99,11 +100,15 @@ class MP3Player:
             self.play_selection((self.current_index - 1) % len(self.playlist))
 
     # --- Content Loading ---
-    def load_jellyfin(self):
+    def load_jellyfin(self, shuffle=False):
         """Load playlist from Jellyfin."""
         try:
             self.playlist = JellyfinClient.get_items()
-            self.view_state, self.scroll_index = "BROWSER", 0
+            if shuffle:
+                random.shuffle(self.playlist)
+                self.play_selection(0)
+            else:
+                self.view_state, self.scroll_index = "BROWSER", 0
         except Exception as e:
             self.draw_error(f"Jellyfin Fail: {str(e)[:15]}")
 
@@ -281,9 +286,10 @@ class MP3Player:
             song = self.playlist[self.current_index]
             self.display.draw_text(5, 10, "NOW PLAYING", fill="GREEN")
             self.display.draw_text(5, 40, song["name"][:18], fill="WHITE")
-            length = self.audio.get_duration()
+            # Use duration from item metadata if available, otherwise use audio player duration
+            length = song.get("duration") or self.audio.get_duration()
             cur = self.audio.get_time()
-            if length > 0:
+            if length > 0 and cur >= 0:
                 bar = int((cur / length) * 110)
                 self.display.draw_rectangle(10, 75, 120, 80, outline="WHITE")
                 self.display.draw_rectangle(10, 75, 10 + bar, 80, fill="BLUE")
@@ -316,8 +322,10 @@ class MP3Player:
         if self.input.is_pressed("PRESS") or self.input.is_pressed("KEY2"):
             if self.view_state == "MENU":
                 choice = self.menu_options[self.scroll_index]
-                if "Jellyfin" in choice:
-                    self.load_jellyfin()
+                if choice == "Jellyfin":
+                    self.load_jellyfin(shuffle=False)
+                elif choice == "Jellyfin Shuffle":
+                    self.load_jellyfin(shuffle=True)
                 elif "Audiobook" in choice:
                     self.load_abs()
                 elif "Local Files" in choice:
@@ -355,7 +363,8 @@ class MP3Player:
                 self.jump_to_letter(1)
             elif self.view_state == "PLAYING":
                 pos = self.audio.get_time()
-                self.audio.set_time(pos + 30000)
+                duration = self.audio.get_duration()
+                self.audio.set_time(min(duration - 100, pos + 30000))
             time.sleep(0.2)
 
     def run(self):
@@ -369,6 +378,13 @@ class MP3Player:
                 ):
                     self.save_bookmark()
                     self.last_save_time = time.time()
+                # Auto-play next track when current finishes
+                if self.view_state == "PLAYING" and not self.audio.is_playing():
+                    if self.current_index < len(self.playlist) - 1:
+                        self.next()
+                    else:
+                        # Loop back to start of playlist
+                        self.play_selection(0)
                 self.render()
                 time.sleep(0.05)
         except KeyboardInterrupt:
