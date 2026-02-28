@@ -14,20 +14,26 @@ echo "🏠 User home: $USER_HOME"
 chmod +x "$PROJECT_DIR/dep-install.sh"
 "$PROJECT_DIR/dep-install.sh"
 
-# 2. Find Python executable in venv
-if [ -f "$PROJECT_DIR/.venv/bin/python" ]; then
-    PYTHON_PATH="$PROJECT_DIR/.venv/bin/python"
-    echo "✓ Found venv Python: $PYTHON_PATH"
-elif [ -f "$PROJECT_DIR/.venv/bin/python3" ]; then
-    PYTHON_PATH="$PROJECT_DIR/.venv/bin/python3"
-    echo "✓ Found venv Python3: $PYTHON_PATH"
+# 2. Find uv executable
+if command -v uv &> /dev/null; then
+    UV_PATH="uv"
+    echo "✓ Found uv in PATH: $(command -v uv)"
+elif [ -f "$USER_HOME/.local/bin/uv" ]; then
+    UV_PATH="$USER_HOME/.local/bin/uv"
+    echo "✓ Found uv at: $UV_PATH"
 else
-    echo "❌ ERROR: Could not find Python in venv!"
-    echo "   Expected: $PROJECT_DIR/.venv/bin/python"
+    echo "❌ ERROR: Could not find uv!"
+    echo "   Please ensure uv is installed: curl -LsSf https://astral.sh/uv/install.sh | sh"
     exit 1
 fi
 
-# 3. Verify .env file exists
+# 3. Verify Python in venv (as fallback check)
+if ! [ -f "$PROJECT_DIR/.venv/bin/python" ] && ! [ -f "$PROJECT_DIR/.venv/bin/python3" ]; then
+    echo "⚠️  WARNING: venv not found at $PROJECT_DIR/.venv"
+    echo "   Run 'uv sync' to create it"
+fi
+
+# 4. Verify .env file exists
 if [ ! -f "$PROJECT_DIR/.env" ]; then
     echo "⚠️  WARNING: .env file not found!"
     echo "   Creating template .env file..."
@@ -46,7 +52,7 @@ ENVEOF
     echo "   ⚠️  Please edit .env with your server details before starting!"
 fi
 
-# 4. Create the systemd service file
+# 5. Create the systemd service file
 echo "🔧 Creating systemd service: mediapi.service"
 
 sudo tee /etc/systemd/system/mediapi.service > /dev/null <<EOF
@@ -64,8 +70,8 @@ Group=$CURRENT_USER
 # Working directory
 WorkingDirectory=$PROJECT_DIR
 
-# Start command - disable auto_connect_bt for systemd to avoid startup delays
-ExecStart=$PYTHON_PATH -c "from player import MP3Player; app = MP3Player(use_hardware=True, auto_connect_bt=False); app.run()"
+# Start command - use uv to run player
+ExecStart=$UV_PATH run player.py
 
 # Restart policy
 Restart=on-failure
@@ -98,11 +104,11 @@ TimeoutStopSec=10
 WantedBy=multi-user.target
 EOF
 
-# 5. Set correct permissions on project directory
+# 6. Set correct permissions on project directory
 echo "🔐 Setting directory permissions..."
 sudo chown -R "$CURRENT_USER:$CURRENT_USER" "$PROJECT_DIR" || true
 
-# 6. Activate the service
+# 7. Activate the service
 echo "🔄 Reloading systemd and starting service..."
 sudo systemctl daemon-reload
 sudo systemctl enable mediapi.service
@@ -114,7 +120,7 @@ else
     echo "⚠️  Service start had issues. Checking logs..."
 fi
 
-# 7. Show status and next steps
+# 8. Show status and next steps
 echo ""
 echo "════════════════════════════════════════════════════════════"
 echo "✅ Installation Complete!"
@@ -124,7 +130,7 @@ echo "📋 Service Information:"
 echo "   • Service name: mediapi"
 echo "   • User: $CURRENT_USER"
 echo "   • Project: $PROJECT_DIR"
-echo "   • Python: $PYTHON_PATH"
+echo "   • Runner: uv ($UV_PATH)"
 echo ""
 echo "🔍 Useful Commands:"
 echo "   • Check status:  sudo systemctl status mediapi"
