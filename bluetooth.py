@@ -1,4 +1,4 @@
-"""Bluetooth pairing and connection management for PipeWire/BlueZ."""
+"""Bluetooth management optimized for PipeWire on Pi Zero."""
 
 import subprocess
 import time
@@ -9,12 +9,9 @@ logger = logging.getLogger(__name__)
 
 
 class BluetoothManager:
-    """Manages Bluetooth device pairing and connection with PipeWire support."""
-
     @staticmethod
     def _run_cmd(cmd, timeout=15):
         try:
-            # Combine stdout and stderr to catch all messages
             result = subprocess.run(
                 cmd,
                 shell=True,
@@ -23,168 +20,88 @@ class BluetoothManager:
                 stderr=subprocess.STDOUT,
                 text=True,
             )
-            success = result.returncode == 0
-            # Log the output even if it failed so we can see the "Reason: ..."
-            if not success:
-                logger.debug(f"Command '{cmd}' failed. Output: {result.stdout.strip()}")
-            return success, result.stdout.strip(), result.stdout.strip()
+            return result.returncode == 0, result.stdout.strip()
         except Exception as e:
-            logger.error(f"Error running command '{cmd}': {e}")
-            return False, "", str(e)
+            return False, str(e)
 
     @staticmethod
-    def _ensure_power():
-        """Ensure the Bluetooth controller is unblocked and powered on."""
-        # Unblock at the kernel level
+    def connect(mac_address, device_name=None):
+        logger.info(f"Connecting to {device_name or mac_address}...")
+
+        # 1. Force hardware power
         BluetoothManager._run_cmd("sudo rfkill unblock bluetooth")
+        BluetoothManager._run_cmd("bluetoothctl power on")
 
-        # Attempt to power on via bluetoothctl
-        success, _, _ = BluetoothManager._run_cmd("bluetoothctl power on", timeout=5)
+        # 2. Connection Handshake
+        BluetoothManager._run_cmd(f"bluetoothctl trust {mac_address}")
+        success, output = BluetoothManager._run_cmd(
+            f"bluetoothctl connect {mac_address}"
+        )
 
-        if not success:
-            logger.warning(
-                "Standard power-on failed. Attempting hardware serial reset (hciuart)..."
-            )
-            BluetoothManager._run_cmd("sudo systemctl restart hciuart", timeout=10)
-            time.sleep(2)
-            BluetoothManager._run_cmd("bluetoothctl power on", timeout=5)
+        if success:
+            logger.info("Bluetooth link established. Syncing audio engine...")
+            # THE FIX: Give the Pi Zero's CPU time to breathe!
+            time.sleep(4)
+
+            # 3. Route Audio (Simplified)
+            BluetoothManager._route_audio_aggresive()
+
+            Storage.save_last_bluetooth_device(mac_address, device_name or "Unknown")
+            return True
+        else:
+            logger.error(f"Link failed: {output}")
+            return False
 
     @staticmethod
-    def scan_devices(timeout_seconds=8):
-        """Scan for available Bluetooth devices."""
-        logger.info("Scanning for Bluetooth devices...")
-        BluetoothManager._ensure_power()
+    def _route_audio_aggresive():
+        """Force ANY connected BlueZ device to be the primary sink."""
+        try:
+            # Step A: Find the Sink Name using a broad filter
+            # We look for anything starting with 'bluez_output'
+            cmd = "pactl list short sinks | grep bluez_output | cut -f2"
+            _, sink_name = BluetoothManager._run_cmd(cmd)
 
-        # Start discovery
-        BluetoothManager._run_cmd(
-            f"bluetoothctl --timeout {timeout_seconds} scan on",
-            timeout=timeout_seconds + 2,
-        )
+            if sink_name:
+                logger.info(f"Found Bluetooth sink: {sink_name}")
+                # Step B: Set as Default
+                BluetoothManager._run_cmd(f"pactl set-default-sink {sink_name}")
+                # Step C: Maximize Volume (PipeWire defaults to low)
+                BluetoothManager._run_cmd(f"pactl set-sink-volume {sink_name} 80%")
+                # Step D: Move any existing streams (VLC) to this speaker
+                move_cmd = (
+                    "pactl list short sink-inputs | cut -f1 | xargs -I{} pactl move-sink-input {} "
+                    + sink_name
+                )
+                BluetoothManager._run_cmd(move_cmd)
+                return True
+            else:
+                # HAIL MARY: If we can't find it by name, just try to 'kick' the policy
+                logger.warning(
+                    "Sink not found by name, attempting global policy refresh..."
+                )
+                BluetoothManager._run_cmd(
+                    "wpctl set-default $(wpctl status | grep -m 1 'bluez_output' | grep -oP '\d+(?=\.)')"
+                )
+        except Exception as e:
+            logger.debug(f"Routing error: {e}")
+        return False
 
-        result = subprocess.run(
-            ["bluetoothctl", "devices"], capture_output=True, text=True, timeout=5
-        )
-
+    @staticmethod
+    def scan_devices(timeout_seconds=5):
+        BluetoothManager._run_cmd("bluetoothctl power on")
+        BluetoothManager._run_cmd(f"bluetoothctl --timeout {timeout_seconds} scan on")
+        _, out = BluetoothManager._run_cmd("bluetoothctl devices")
         devices = []
-        for line in result.stdout.split("\n"):
+        for line in out.split("\n"):
             if line.startswith("Device"):
                 parts = line.split(" ", 2)
                 if len(parts) >= 3:
                     devices.append({"mac": parts[1], "name": parts[2]})
-
-        logger.info(f"Found {len(devices)} Bluetooth devices")
         return devices
 
     @staticmethod
-    def connect(mac_address, device_name=None):
-        """Pair, trust, and connect to a Bluetooth device."""
-        logger.info(f"Connecting to {device_name or mac_address}...")
-        BluetoothManager._ensure_power()
-
-        # Trust (Crucial for auto-reconnect)
-        logger.debug(f"Trusting {mac_address}...")
-        BluetoothManager._run_cmd(f"bluetoothctl trust {mac_address}", timeout=5)
-
-        # Pair
-        logger.debug(f"Pairing with {mac_address}...")
-        BluetoothManager._run_cmd(f"bluetoothctl pair {mac_address}", timeout=15)
-        time.sleep(1)
-
-        # Connect
-        logger.debug(f"Initiating connection to {mac_address}...")
-        success, stdout, stderr = BluetoothManager._run_cmd(
-            f"bluetoothctl connect {mac_address}", timeout=15
-        )
-
-        if success:
-            # Give PipeWire/WirePlumber a moment to initialize the A2DP profile
-            time.sleep(2)
-            # Route audio
-            BluetoothManager._route_audio(mac_address)
-            # Save as last-used device
-            Storage.save_last_bluetooth_device(mac_address, device_name or "Unknown")
-            logger.info(f"Successfully connected to {device_name or mac_address}")
-            return True
-        else:
-            logger.error(f"Connection failed to {mac_address}: {stderr}")
-            return False
-
-    @staticmethod
     def auto_connect_last_device():
-        """Attempt to auto-connect to the last-used Bluetooth device."""
         device = Storage.load_last_bluetooth_device()
-        if not device:
-            logger.debug("No last-used Bluetooth device found")
-            return False
-
-        logger.info(f"Attempting to auto-connect to {device['name']}...")
-        BluetoothManager._ensure_power()
-
-        try:
-            # Try to connect directly (assuming already paired/trusted)
-            success, _, stderr = BluetoothManager._run_cmd(
-                f"bluetoothctl connect {device['mac']}", timeout=15
-            )
-
-            if success:
-                time.sleep(2)
-                BluetoothManager._route_audio(device["mac"])
-                logger.info(f"Auto-connected to {device['name']}")
-                return True
-            else:
-                logger.warning(f"Failed to auto-connect: {stderr}")
-                return False
-        except Exception as e:
-            logger.warning(f"Auto-connect failed: {e}")
-            return False
-
-    @staticmethod
-    def _route_audio(mac_address):
-        """Route PipeWire audio output with retries for slow Pi Zero CPU."""
-        sink_mac = mac_address.replace(":", "_")
-        max_attempts = 5
-
-        logger.info(f"Waiting for PipeWire to initialize sink for {mac_address}...")
-
-        for attempt in range(max_attempts):
-            # Give the Pi more time to negotiate the codec (A2DP)
-            time.sleep(2)
-
-            result = subprocess.run(
-                ["pactl", "list", "short", "sinks"],
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-
-            sink_name = None
-            for line in result.stdout.split("\n"):
-                if sink_mac in line:
-                    parts = line.split("\t")
-                    if len(parts) > 1:
-                        sink_name = parts[1]
-                        break
-
-            if sink_name:
-                # Found it! Now route the audio
-                BluetoothManager._run_cmd(f"pactl set-default-sink {sink_name}")
-                # Move any existing audio streams to the new speaker
-                move_cmd = f"pactl list short sink-inputs | cut -f1 | xargs -I{{}} pactl move-sink-input {{}} {sink_name}"
-                BluetoothManager._run_cmd(move_cmd)
-
-                # Boost volume just in case it defaulted to 0
-                BluetoothManager._run_cmd(f"pactl set-sink-volume {sink_name} 70%")
-
-                logger.info(
-                    f"✅ Audio successfully routed to {sink_name} (Attempt {attempt + 1})"
-                )
-                return True
-
-            logger.debug(
-                f"Sink not ready yet, retrying... ({attempt + 1}/{max_attempts})"
-            )
-
-        logger.warning(
-            f"❌ Connected, but no PipeWire sink appeared for {mac_address} after {max_attempts} attempts."
-        )
+        if device:
+            return BluetoothManager.connect(device["mac"], device["name"])
         return False
