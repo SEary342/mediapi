@@ -42,9 +42,18 @@ if [ -f "pyproject.toml" ]; then
 fi
 
 echo "--- 🔊 Enabling PulseAudio User Service ---"
-# Enable lingering so the user's audio daemon starts at boot
+# 1. Enable lingering so the user's manager starts at boot and stays running
 loginctl enable-linger "$REAL_USER"
+
+# 2. Get the User ID
 USER_ID=$(id -u "$REAL_USER")
-sudo -u "$REAL_USER" XDG_RUNTIME_DIR="/run/user/$USER_ID" systemctl --user enable pulseaudio.service pulseaudio.socket || true
+
+# 3. Force-start the user's systemd instance so we can talk to it
+systemctl start "user@$USER_ID.service"
+
+# 4. Now enable the services using the user's own bus
+sudo -u "$REAL_USER" XDG_RUNTIME_DIR="/run/user/$USER_ID" \
+    DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$USER_ID/bus" \
+    systemctl --user enable pulseaudio.service pulseaudio.socket || true
 
 echo "--- ✅ Dependencies Done! ---"
