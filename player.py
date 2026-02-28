@@ -150,7 +150,7 @@ class MP3Player:
         elif item["source"] == Source.JELLYFIN.value:
             uri = JellyfinClient.get_stream_uri(item["id"])
         elif item["source"] == Source.ABS.value:
-            uri = AudiobookshelfClient.get_stream_uri(item["id"])
+            uri = AudiobookshelfClient.get_stream_uri(item)
         else:
             return
 
