@@ -1,4 +1,5 @@
-"""Bluetooth pairing and connection management."""
+"""Bluetooth pairing and connection management for PipeWire/BlueZ."""
+
 import subprocess
 import time
 import logging
@@ -8,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 
 class BluetoothManager:
-    """Manages Bluetooth device pairing and connection."""
+    """Manages Bluetooth device pairing and connection with PipeWire support."""
 
     @staticmethod
     def _run_cmd(cmd, timeout=10):
@@ -33,10 +34,29 @@ class BluetoothManager:
             return False, "", str(e)
 
     @staticmethod
-    def scan_devices(timeout_seconds=5):
+    def _ensure_power():
+        """Ensure the Bluetooth controller is unblocked and powered on."""
+        # Unblock at the kernel level
+        BluetoothManager._run_cmd("sudo rfkill unblock bluetooth")
+
+        # Attempt to power on via bluetoothctl
+        success, _, _ = BluetoothManager._run_cmd("bluetoothctl power on", timeout=5)
+
+        if not success:
+            logger.warning(
+                "Standard power-on failed. Attempting hardware serial reset (hciuart)..."
+            )
+            BluetoothManager._run_cmd("sudo systemctl restart hciuart", timeout=10)
+            time.sleep(2)
+            BluetoothManager._run_cmd("bluetoothctl power on", timeout=5)
+
+    @staticmethod
+    def scan_devices(timeout_seconds=8):
         """Scan for available Bluetooth devices."""
         logger.info("Scanning for Bluetooth devices...")
-        BluetoothManager._run_cmd("bluetoothctl power on", timeout=5)
+        BluetoothManager._ensure_power()
+
+        # Start discovery
         BluetoothManager._run_cmd(
             f"bluetoothctl --timeout {timeout_seconds} scan on",
             timeout=timeout_seconds + 2,
@@ -58,25 +78,17 @@ class BluetoothManager:
 
     @staticmethod
     def connect(mac_address, device_name=None):
-        """Pair and connect to a Bluetooth device."""
+        """Pair, trust, and connect to a Bluetooth device."""
         logger.info(f"Connecting to {device_name or mac_address}...")
+        BluetoothManager._ensure_power()
+
+        # Trust (Crucial for auto-reconnect)
+        logger.debug(f"Trusting {mac_address}...")
+        BluetoothManager._run_cmd(f"bluetoothctl trust {mac_address}", timeout=5)
 
         # Pair
         logger.debug(f"Pairing with {mac_address}...")
-        success, stdout, stderr = BluetoothManager._run_cmd(
-            f"bluetoothctl pair {mac_address}", timeout=15
-        )
-        if not success and stderr:
-            logger.warning(f"Pairing result: {stderr}")
-        time.sleep(1)
-
-        # Trust
-        logger.debug(f"Trusting {mac_address}...")
-        success, stdout, stderr = BluetoothManager._run_cmd(
-            f"bluetoothctl trust {mac_address}", timeout=5
-        )
-        if not success and stderr:
-            logger.warning(f"Trust result: {stderr}")
+        BluetoothManager._run_cmd(f"bluetoothctl pair {mac_address}", timeout=15)
         time.sleep(1)
 
         # Connect
@@ -84,16 +96,10 @@ class BluetoothManager:
         success, stdout, stderr = BluetoothManager._run_cmd(
             f"bluetoothctl connect {mac_address}", timeout=15
         )
-        if not success:
-            if stderr:
-                logger.error(f"Connection failed: {stderr}")
-            else:
-                logger.error("Connection failed (no error details)")
-            return False
-        
-        time.sleep(2)
 
         if success:
+            # Give PipeWire/WirePlumber a moment to initialize the A2DP profile
+            time.sleep(2)
             # Route audio
             BluetoothManager._route_audio(mac_address)
             # Save as last-used device
@@ -101,7 +107,7 @@ class BluetoothManager:
             logger.info(f"Successfully connected to {device_name or mac_address}")
             return True
         else:
-            logger.error(f"Failed to connect to {mac_address}")
+            logger.error(f"Connection failed to {mac_address}: {stderr}")
             return False
 
     @staticmethod
@@ -113,32 +119,21 @@ class BluetoothManager:
             return False
 
         logger.info(f"Attempting to auto-connect to {device['name']}...")
-        try:
-            # Check if device is available
-            result = subprocess.run(
-                ["bluetoothctl", "devices"],
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            if device["mac"] not in result.stdout:
-                logger.warning(
-                    f"Last device {device['mac']} not available, skipping auto-connect"
-                )
-                return False
+        BluetoothManager._ensure_power()
 
-            # Try to connect
-            success, stdout, stderr = BluetoothManager._run_cmd(
-                f"bluetoothctl connect {device['mac']}", timeout=10
+        try:
+            # Try to connect directly (assuming already paired/trusted)
+            success, _, stderr = BluetoothManager._run_cmd(
+                f"bluetoothctl connect {device['mac']}", timeout=15
             )
-            time.sleep(2)
 
             if success:
+                time.sleep(2)
                 BluetoothManager._route_audio(device["mac"])
                 logger.info(f"Auto-connected to {device['name']}")
                 return True
             else:
-                logger.warning(f"Failed to auto-connect to {device['name']}")
+                logger.warning(f"Failed to auto-connect: {stderr}")
                 return False
         except Exception as e:
             logger.warning(f"Auto-connect failed: {e}")
@@ -146,9 +141,12 @@ class BluetoothManager:
 
     @staticmethod
     def _route_audio(mac_address):
-        """Route audio output to the connected Bluetooth device."""
+        """Route PipeWire audio output to the connected Bluetooth device."""
         try:
+            # PipeWire uses underscores in MAC addresses for sink naming
             sink_mac = mac_address.replace(":", "_")
+
+            # Get current sinks from PipeWire (pactl is the compatible interface)
             result = subprocess.run(
                 ["pactl", "list", "short", "sinks"],
                 capture_output=True,
@@ -156,26 +154,29 @@ class BluetoothManager:
                 timeout=5,
             )
 
+            sink_name = None
             for line in result.stdout.split("\n"):
                 if sink_mac in line:
-                    sink_name = line.split("\t")[1]
-                    logger.debug(f"Routing audio to sink: {sink_name}")
-                    success, _, stderr = BluetoothManager._run_cmd(
-                        f"pactl set-default-sink {sink_name}", timeout=5
-                    )
-                    if not success and stderr:
-                        logger.warning(f"Failed to set default sink: {stderr}")
-                    # Move currently playing stream to the new sink (if playing)
-                    success, _, stderr = BluetoothManager._run_cmd(
-                        f"pactl list short sink-inputs | cut -f1 | xargs -I{{}} pactl move-sink-input {{}} {sink_name}",
-                        timeout=5,
-                    )
-                    if not success and stderr:
-                        logger.warning(f"Failed to move sink inputs: {stderr}")
-                    logger.info(f"Audio routed to {sink_name}")
-                    break
-        except subprocess.TimeoutExpired:
-            logger.warning("Audio routing timed out")
+                    # Line format: ID  NAME  MODULE  ID  STATE
+                    parts = line.split("\t")
+                    if len(parts) > 1:
+                        sink_name = parts[1]
+                        break
+
+            if sink_name:
+                logger.debug(f"Setting default sink to: {sink_name}")
+                # Set default for new streams
+                BluetoothManager._run_cmd(f"pactl set-default-sink {sink_name}")
+
+                # Move any existing streams (like VLC currently playing) to the new sink
+                move_cmd = f"pactl list short sink-inputs | cut -f1 | xargs -I{{}} pactl move-sink-input {{}} {sink_name}"
+                BluetoothManager._run_cmd(move_cmd)
+
+                logger.info(f"Audio routed to {sink_name}")
+            else:
+                logger.warning(
+                    f"Connected to {mac_address}, but no PipeWire sink found. Is the device an audio device?"
+                )
+
         except Exception as e:
             logger.warning(f"Failed to route audio: {e}")
-
