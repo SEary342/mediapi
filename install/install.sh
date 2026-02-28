@@ -2,7 +2,7 @@
 set -e
 
 # --- Configuration & Paths ---
-PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CURRENT_USER="${SUDO_USER:-$(whoami)}"
 USER_HOME=$(eval echo ~$CURRENT_USER)
 USER_ID=$(id -u "$CURRENT_USER")
@@ -10,10 +10,11 @@ USER_ID=$(id -u "$CURRENT_USER")
 echo "🚀 Installing MediAPI Player Service for $CURRENT_USER..."
 
 # --- 1. Run Dependency Script ---
-if [ -f "$PROJECT_DIR/dep-install.sh" ]; then
+if [ -f "$PROJECT_DIR/install/dep-install.sh" ]; then
     echo "📦 Running dependency installer..."
-    chmod +x "$PROJECT_DIR/dep-install.sh"
-    sudo "$PROJECT_DIR/dep-install.sh"
+    chmod +x "$PROJECT_DIR/install/dep-install.sh"
+    cd "$PROJECT_DIR"
+    sudo "./install/dep-install.sh"
 fi
 
 # --- 2. Find uv Executable ---
