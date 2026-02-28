@@ -37,16 +37,28 @@ UV_PATH="$REAL_HOME/.local/bin/uv"
 
 if [ -f "$PROJECT_DIR/pyproject.toml" ]; then
     echo "📦 Syncing Python dependencies..."
-    sudo -u "$REAL_USER" bash -c "export PATH=\"$REAL_HOME/.local/bin:\$PATH\" && $UV_PATH sync"
+    sudo -u "$REAL_USER" bash -c "cd '$PROJECT_DIR' && export PATH=\"$REAL_HOME/.local/bin:\$PATH\" && $UV_PATH sync"
 fi
 
-# --- 6. Bluetooth Configuration ---
+# --- 6. Grant Port 80 Permission ---
+echo "🔑 Granting permission for the app to use port 80..."
+# This gives the Python interpreter in the venv the capability to bind to privileged ports
+PYTHON_EXEC="$PROJECT_DIR/.venv/bin/python"
+if [ -f "$PYTHON_EXEC" ]; then
+    sudo setcap 'cap_net_bind_service=+ep' "$PYTHON_EXEC"
+    echo "✅ Permission granted to $PYTHON_EXEC"
+else
+    echo "⚠️  WARNING: Could not find Python executable at $PYTHON_EXEC. Skipping port permission."
+fi
+
+
+# --- 7. Bluetooth Configuration ---
 echo "📻 Configuring Bluetooth Audio Class..."
 sudo sed -i '/^#\?Enable=/c\Enable=Source,Sink,Media,Socket' /etc/bluetooth/main.conf
 sudo sed -i '/^#\?Class=/c\Class=0x20041C' /etc/bluetooth/main.conf
 sudo systemctl restart bluetooth
 
-# --- 7. PulseAudio User Service (The tricky part) ---
+# --- 8. PulseAudio User Service (The tricky part) ---
 echo "🔊 Enabling PulseAudio for $REAL_USER..."
 # This ensures the user's services start even when not logged in
 sudo loginctl enable-linger "$REAL_USER"
@@ -55,8 +67,9 @@ sudo loginctl enable-linger "$REAL_USER"
 sudo -u "$REAL_USER" XDG_RUNTIME_DIR="/run/user/$USER_ID" \
     systemctl --user enable pulseaudio.service pulseaudio.socket || true
 
-# --- 8. Create MediAPI Service ---
+# --- 9. Create MediAPI Service ---
 echo "🔧 Creating systemd service..."
+UV_EXEC="$REAL_HOME/.local/bin/uv"
 sudo tee /etc/systemd/system/mediapi.service > /dev/null <<EOF
 [Unit]
 Description=MediAPI - Music Player Service
@@ -68,7 +81,7 @@ Requires=bluetooth.target
 User=$REAL_USER
 Group=$REAL_USER
 WorkingDirectory=$PROJECT_DIR
-ExecStart=$UV_PATH run player.py
+ExecStart=$UV_EXEC run player.py
 Restart=on-failure
 RestartSec=10
 StandardOutput=journal
@@ -83,7 +96,7 @@ SupplementaryGroups=audio bluetooth lp spi gpio
 WantedBy=multi-user.target
 EOF
 
-# --- 9. Finalize ---
+# --- 10. Finalize ---
 sudo systemctl daemon-reload
 sudo systemctl enable mediapi.service
 
