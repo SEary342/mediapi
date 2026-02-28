@@ -366,6 +366,7 @@ class MP3Player:
             time.sleep(0.2)
 
         if self.input.is_pressed("RIGHT"):
+            logger.error(f"RIGHT button pressed in state {self.view_state}")
             if self.view_state == "BROWSER":
                 self.jump_to_letter(1)
             elif self.view_state == "PLAYING":
